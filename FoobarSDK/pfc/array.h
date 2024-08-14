@@ -1,5 +1,8 @@
-#ifndef _PFC_ARRAY_H_
-#define _PFC_ARRAY_H_
+#pragma once
+
+#include <utility> // std::forward
+
+#include "alloc.h"
 
 namespace pfc {
 
@@ -12,43 +15,68 @@ namespace pfc {
 	public: typedef _t_item t_item;
 	private: typedef array_staticsize_t<t_item> t_self;
 	public:
-		array_staticsize_t() : m_size(0), m_array(NULL) {}
+		array_staticsize_t() : m_array(NULL), m_size(0) {}
 		array_staticsize_t(t_size p_size) : m_array(new t_item[p_size]), m_size(p_size) {}
-		~array_staticsize_t() {__release();}
+		~array_staticsize_t() {release_();}
 
 		//! Copy constructor nonfunctional when data type is not copyable.
 		array_staticsize_t(const t_self & p_source) : m_size(0), m_array(NULL) {
 			*this = p_source;
 		}
+        array_staticsize_t(t_self && p_source) {
+            move_(p_source);
+        }
 
 		//! Copy operator nonfunctional when data type is not copyable.
 		const t_self & operator=(const t_self & p_source) {
-			__release();
+			release_();
 			
-			//m_array = pfc::malloc_copy_t(p_source.get_size(),p_source.get_ptr());
 			const t_size newsize = p_source.get_size();
-			m_array = new t_item[newsize];
-			m_size = newsize;
-			for(t_size n = 0; n < newsize; n++) m_array[n] = p_source[n];
+            if (newsize > 0) {
+                m_array = new t_item[newsize];
+                m_size = newsize;
+                for(t_size n = 0; n < newsize; n++) m_array[n] = p_source[n];
+            }
 			return *this;
 		}
+        
+        //! Move operator.
+        const t_self & operator=(t_self && p_source) {
+            release_();
+            move_(p_source);
+            return *this;
+        }
 
 		void set_size_discard(t_size p_size) {
-			__release();
+			release_();
 			if (p_size > 0) {
 				m_array = new t_item[p_size];
 				m_size = p_size;
 			}
 		}
-		//! Warning: buffer pointer must not point to buffer allocated by this array (fixme).
 		template<typename t_source>
 		void set_data_fromptr(const t_source * p_buffer,t_size p_count) {
-			set_size_discard(p_count);
-			pfc::copy_array_loop_t(*this,p_buffer,p_count);
+            if (p_count == m_size) {
+                pfc::copy_array_loop_t(*this,p_buffer,p_count);
+            } else {
+                t_item * arr = new t_item[p_count];
+                try {
+                    pfc::copy_array_loop_t(arr, p_buffer, p_count);
+                } catch(...) { delete[] arr; throw; }
+                delete[] m_array;
+                m_array = arr;
+                m_size = p_count;
+            }
 		}
+        
+        template<typename t_source>
+        void assign(t_source const * items, size_t count) {
+            set_data_fromptr( items, count );
+        }
 
 		
 		t_size get_size() const {return m_size;}
+		t_size size() const {return m_size;} // std compat
 		const t_item * get_ptr() const {return m_array;}
 		t_item * get_ptr() {return m_array;}
 
@@ -58,17 +86,30 @@ namespace pfc {
 		template<typename t_source> bool is_owned(const t_source & p_item) {return pfc::is_pointer_in_range(get_ptr(),get_size(),&p_item);}
 
 		template<typename t_out> void enumerate(t_out & out) const { for(t_size walk = 0; walk < m_size; ++walk) out(m_array[walk]); }
+
+		// Modern for loop support
+		t_item* begin() { return get_ptr(); }
+		t_item* end() { return get_ptr() + get_size(); }
+		const t_item* begin() const { return get_ptr(); }
+		const t_item* end() const { return get_ptr() + get_size(); }
+
 	private:
-		void __release() {
+		void release_() {
 			m_size = 0;
 			delete[] pfc::replace_null_t(m_array);
 		}
+        void move_(t_self & from) {
+            m_size = from.m_size;
+            m_array = from.m_array;
+            from.m_size = 0;
+            from.m_array = NULL;
+        }
 		t_item * m_array;
 		t_size m_size;
 	};
 
 	template<typename t_to,typename t_from>
-	inline void copy_array_t(t_to & p_to,const t_from & p_from) {
+	void copy_array_t(t_to & p_to,const t_from & p_from) {
 		const t_size size = array_size_t(p_from);
 		if (p_to.has_owned_items(p_from)) {//avoid landmines with actual array data overlapping, or p_from being same as p_to
 			array_staticsize_t<typename t_to::t_item> temp;
@@ -83,7 +124,7 @@ namespace pfc {
 	}
 
 	template<typename t_array,typename t_value>
-	inline void fill_array_t(t_array & p_array,const t_value & p_value) {
+	void fill_array_t(t_array & p_array,const t_value & p_value) {
 		const t_size size = array_size_t(p_array);
 		for(t_size n=0;n<size;n++) p_array[n] = p_value;
 	}
@@ -97,11 +138,39 @@ namespace pfc {
 		template<typename t_source> array_t(const t_source & p_source) {copy_array_t(*this,p_source);}
 		const t_self & operator=(const t_self & p_source) {copy_array_t(*this,p_source); return *this;}
 		template<typename t_source> const t_self & operator=(const t_source & p_source) {copy_array_t(*this,p_source); return *this;}
+
+		array_t(t_self && p_source) {move_from(p_source);}
+		const t_self & operator=(t_self && p_source) {move_from(p_source); return *this;}
 		
 		void set_size(t_size p_size) {m_alloc.set_size(p_size);}
+		void resize( size_t s ) { set_size(s); } // std compat
+		
+		template<typename fill_t>
+		void set_size_fill(size_t p_size, fill_t const & filler) {
+			size_t before = get_size();
+			set_size( p_size );
+			for(size_t w = before; w < p_size; ++w) this->get_ptr()[w] = filler;
+		}
+		
+		void set_size_in_range(size_t minSize, size_t maxSize) {
+			if (minSize >= maxSize) { set_size( minSize); return; }
+			size_t walk = maxSize;
+			for(;;) {
+				try {
+					set_size(walk);
+					return;
+				} catch(std::bad_alloc const &) {
+					if (walk <= minSize) throw;
+					// go on
+				}
+				walk >>= 1;
+				if (walk < minSize) walk = minSize;
+			}
+		}
 		void set_size_discard(t_size p_size) {m_alloc.set_size(p_size);}
 		void set_count(t_size p_count) {m_alloc.set_size(p_count);}
 		t_size get_size() const {return m_alloc.get_size();}
+		size_t size() const {return m_alloc.get_size();} // std compat
 		t_size get_count() const {return m_alloc.get_size();}
 		void force_reset() {m_alloc.force_reset();}
 		
@@ -149,6 +218,19 @@ namespace pfc {
 			t_size new_size = get_size() + p_delta;
 			if (new_size < p_delta) throw std::bad_alloc();
 			set_size(new_size);
+		}
+
+        template<typename item_t>
+        void add_item( item_t && item ) {
+            const t_size base = get_size();
+            increase_size(1);
+            m_alloc[base] = std::forward<item_t>( item );
+        }
+		template<typename item_t>
+		void append_single_val( item_t && item ) {
+			const t_size base = get_size();
+			increase_size(1);
+            m_alloc[base] = std::forward<item_t>( item );
 		}
 
 		template<typename t_append>
@@ -205,6 +287,16 @@ namespace pfc {
 		}
 
 		template<typename t_callback> void enumerate(t_callback & p_callback) const { for(t_size n = 0; n < get_size(); n++ ) { p_callback((*this)[n]); } }
+
+		void move_from(t_self & other) {
+			m_alloc.move_from(other.m_alloc);
+		}
+		
+		// Modern for loop support
+		t_item* begin() { return get_ptr(); }
+		t_item* end() { return get_ptr() + get_size(); }
+		const t_item* begin() const { return get_ptr(); }
+		const t_item* end() const { return get_ptr() + get_size(); }
 	private:
 		t_alloc<t_item> m_alloc;
 	};
@@ -284,5 +376,3 @@ namespace pfc {
 
 }
 
-
-#endif //_PFC_ARRAY_H_

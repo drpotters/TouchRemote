@@ -1,26 +1,10 @@
-namespace pfc {
-	class counter {
-	public:
-		counter(long p_val = 0) : m_val(p_val) {}
-#ifdef _WINDOWS
-		long operator++() throw() {return InterlockedIncrement(&m_val);}
-		long operator--() throw() {return InterlockedDecrement(&m_val);}
-		long operator++(int) throw() {return InterlockedIncrement(&m_val)-1;}
-		long operator--(int) throw() {return InterlockedDecrement(&m_val)+1;}
-#else
-		long operator++() {return ++m_val;}
-		long operator--() {return --m_val;}
-		long operator++(int) {return m_val++;}
-		long operator--(int) {return m_val--;}
-#pragma message("PORTME")
-#endif
-		operator long() const throw() {return m_val;}
-		typedef long t_val;
-	private:
-		volatile long m_val;
-	};
+#pragma once
 
-	typedef counter refcounter;
+#include "traits.h"
+#include "lockless.h"
+#include "primitives.h"
+
+namespace pfc {
 
 	class NOVTABLE refcounted_object_root
 	{
@@ -43,6 +27,7 @@ namespace pfc {
 		inline refcounted_object_ptr_t() throw() : m_ptr(NULL) {}
 		inline refcounted_object_ptr_t(T* p_ptr) throw() : m_ptr(NULL) {copy(p_ptr);}
 		inline refcounted_object_ptr_t(const t_self & p_source) throw() : m_ptr(NULL) {copy(p_source);}
+		inline refcounted_object_ptr_t(t_self && p_source) throw() { m_ptr = p_source.m_ptr; p_source.m_ptr = NULL; }
 
 		template<typename t_source>
 		inline refcounted_object_ptr_t(t_source * p_ptr) throw() : m_ptr(NULL) {copy(p_ptr);}
@@ -65,6 +50,7 @@ namespace pfc {
 
 
 		inline const t_self & operator=(const t_self & p_source) throw() {copy(p_source); return *this;}
+		inline const t_self & operator=(t_self && p_source) throw() {attach(p_source.detach()); return *this;}
 		inline const t_self & operator=(T * p_ptr) throw() {copy(p_ptr); return *this;}
 
 		template<typename t_source> inline t_self & operator=(const refcounted_object_ptr_t<t_source> & p_source) throw() {copy(p_source); return *this;}

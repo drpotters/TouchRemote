@@ -20,6 +20,7 @@ namespace foo_touchremote
                         
 	        int FB2KAPI service_release() throw();
             int FB2KAPI service_add_ref() throw();
+			
 
             void SetDestroyInProgress() { m_destroyWindowInProgress = true; }
 

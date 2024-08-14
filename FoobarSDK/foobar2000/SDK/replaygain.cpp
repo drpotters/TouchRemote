@@ -1,4 +1,6 @@
-#include "foobar2000.h"
+#include "foobar2000-sdk-pch.h"
+#include "replaygain.h"
+#include "replaygain_scanner.h"
 
 void t_replaygain_config::reset()
 {
@@ -8,8 +10,12 @@ void t_replaygain_config::reset()
 	m_preamp_with_rg = 0;
 }
 
-audio_sample t_replaygain_config::query_scale(const file_info & p_info) const
+audio_sample t_replaygain_config::query_scale(const file_info & info) const
 {
+	return query_scale(info.get_replaygain());
+}
+
+audio_sample t_replaygain_config::query_scale(const replaygain_info & info) const {
 	const audio_sample peak_margin = 1.0;//used to be 0.999 but it must not trigger on lossless
 
 	audio_sample peak = peak_margin;
@@ -19,8 +25,6 @@ audio_sample t_replaygain_config::query_scale(const file_info & p_info) const
 
 	if (m_source_mode == source_mode_track || m_source_mode == source_mode_album)
 	{
-		replaygain_info info = p_info.get_replaygain();
-		float gain_select = replaygain_info::gain_invalid, peak_select = replaygain_info::peak_invalid;
 		if (m_source_mode == source_mode_track)
 		{
 			if (info.is_track_gain_present()) {gain = info.m_track_gain; have_rg_gain = true; }
@@ -43,10 +47,10 @@ audio_sample t_replaygain_config::query_scale(const file_info & p_info) const
 
 	if (m_processing_mode == processing_mode_gain || m_processing_mode == processing_mode_gain_and_peak)
 	{
-		scale *= audio_math::gain_to_scale(gain);
+		scale *= (audio_sample) audio_math::gain_to_scale(gain);
 	}
 
-	if (m_processing_mode == processing_mode_peak || m_processing_mode == processing_mode_gain_and_peak)
+	if ((m_processing_mode == processing_mode_peak || m_processing_mode == processing_mode_gain_and_peak) && have_rg_peak)
 	{
 		if (scale * peak > peak_margin)
 			scale = (audio_sample)(peak_margin / peak);
@@ -57,13 +61,7 @@ audio_sample t_replaygain_config::query_scale(const file_info & p_info) const
 
 audio_sample t_replaygain_config::query_scale(const metadb_handle_ptr & p_object) const
 {
-	audio_sample rv = 1.0;
-	p_object->metadb_lock();
-	const file_info * info;
-	if (p_object->get_info_async_locked(info))
-		rv = query_scale(*info);
-	p_object->metadb_unlock();
-	return rv;
+	return query_scale(p_object->get_async_info_ref()->info());
 }
 
 audio_sample replaygain_manager::core_settings_query_scale(const file_info & p_info)
@@ -82,23 +80,19 @@ audio_sample replaygain_manager::core_settings_query_scale(const metadb_handle_p
 
 //enum t_source_mode {source_mode_none,source_mode_track,source_mode_album};
 //enum t_processing_mode {processing_mode_none,processing_mode_gain,processing_mode_gain_and_peak,processing_mode_peak};
-namespace {
-class format_dbdelta
-{
-public:
-	format_dbdelta(double p_val);
-	operator const char*() const {return m_buffer;}
-private:
-	pfc::string_fixed_t<128> m_buffer;
-};
-static const char * querysign(int val) {
-	return val<0 ? "-" : val>0 ? "+" : "\xc2\xb1";
+
+static const char* querysign(int val) {
+	return val < 0 ? "-" : val>0 ? "+" : "\xc2\xb1";
 }
 
-format_dbdelta::format_dbdelta(double p_val) {
-	int val = (int)(p_val * 10);
-	m_buffer << querysign(val) << (abs(val)/10) << "." << (abs(val)%10) << "dB";
+static pfc::string_fixed_t<128> format_dbdelta(double p_val) {
+	pfc::string_fixed_t<128> ret;
+	int val = (int)pfc::rint32(p_val * 10);
+	ret << querysign(val) << (abs(val) / 10) << "." << (abs(val) % 10) << "dB";
+	return ret;
 }
+void t_replaygain_config::print_preamp(double val, pfc::string_base & out) {
+	out = format_dbdelta(val);
 }
 void t_replaygain_config::format_name(pfc::string_base & p_out) const
 {
@@ -112,7 +106,7 @@ void t_replaygain_config::format_name(pfc::string_base & p_out) const
 		{
 		case source_mode_none:
 			if (m_preamp_without_rg == 0) p_out = "None."; 
-			else p_out = pfc::string_formatter() << "Preamp : " << format_dbdelta(m_preamp_without_rg); 
+			else p_out = PFC_string_formatter() << "Preamp : " << format_dbdelta(m_preamp_without_rg);
 			break;
 		case source_mode_track:
 			{
@@ -139,7 +133,7 @@ void t_replaygain_config::format_name(pfc::string_base & p_out) const
 		{
 		case source_mode_none:
 			if (m_preamp_without_rg >= 0) p_out = "None.";
-			else p_out = pfc::string_formatter() << "Preamp : " << format_dbdelta(m_preamp_without_rg);
+			else p_out = PFC_string_formatter() << "Preamp : " << format_dbdelta(m_preamp_without_rg);
 			break;
 		case source_mode_track:
 			{
@@ -220,4 +214,15 @@ bool t_replaygain_config::is_active() const
 	default:
 		return false;
 	}
+}
+
+
+replaygain_scanner::ptr replaygain_scanner_entry::instantiate( uint32_t flags ) {
+	replaygain_scanner_entry_v2::ptr p2;
+	if ( p2 &= this ) return p2->instantiate( flags );
+	else return instantiate();
+}
+
+t_replaygain_config replaygain_manager::get_core_settings() {
+	t_replaygain_config cfg; get_core_settings(cfg); return cfg;
 }

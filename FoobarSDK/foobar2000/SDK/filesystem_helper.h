@@ -1,166 +1,57 @@
-//helper
-class file_path_canonical {
-public:
-	file_path_canonical(const char * src) {filesystem::g_get_canonical_path(src,m_data);}
-	operator const char * () const {return m_data.get_ptr();}
-	const char * get_ptr() const {return m_data.get_ptr();}
-	t_size get_length() const {return m_data.get_length();}
-private:
-	pfc::string8 m_data;
-};
+#pragma once
 
-class file_path_display {
-public:
-	file_path_display(const char * src) {filesystem::g_get_display_path(src,m_data);}
-	operator const char * () const {return m_data.get_ptr();}
-	const char * get_ptr() const {return m_data.get_ptr();}
-	t_size get_length() const {return m_data.get_length();}
-private:
-	pfc::string8 m_data;
-};
+#include <functional>
+#include "filesystem.h"
 
+namespace foobar2000_io {
+    typedef std::function< void (const char *, t_filestats const & , bool ) > listDirectoryFunc_t;
+    void listDirectory( const char * path, abort_callback & aborter, listDirectoryFunc_t func);
 
-class NOVTABLE reader_membuffer_base : public file_readonly {
-public:
-	reader_membuffer_base() : m_offset(0) {}
+#ifdef _WIN32
+	pfc::string8 stripParentFolders( const char * inPath );
+#endif
 
-	t_size read(void * p_buffer,t_size p_bytes,abort_callback & p_abort);
+	void retryOnSharingViolation( std::function<void () > f, double timeout, abort_callback & a);
+	void retryOnSharingViolation( double timeout, abort_callback & a, std::function<void() > f);
 
-	void write(const void * p_buffer,t_size p_bytes,abort_callback & p_abort) {throw exception_io_denied();}
+	// **** WINDOWS SUCKS ****
+	// Special version of retryOnSharingViolation with workarounds for known MoveFile() bugs.
+	void retryFileMove( double timeout, abort_callback & a, std::function<void()> f);
 
-	t_filesize get_size(abort_callback & p_abort) {return get_buffer_size();}
-	t_filesize get_position(abort_callback & p_abort) {return m_offset;}
-	void seek(t_filesize position,abort_callback & p_abort);
-	void reopen(abort_callback & p_abort) {seek(0,p_abort);}
-	
-	bool can_seek() {return true;}
-	bool is_in_memory() {return true;}
-		
-protected:
-	virtual const void * get_buffer() = 0;
-	virtual t_size get_buffer_size() = 0;
-	virtual t_filetimestamp get_timestamp(abort_callback & p_abort) = 0;
-	virtual bool get_content_type(pfc::string_base &) {return false;}
-	inline void seek_internal(t_size p_offset) {if (p_offset > get_buffer_size()) throw exception_io_seek_out_of_range(); m_offset = p_offset;}
-private:
-	t_size m_offset;
-};
+	// **** WINDOWS SUCKS ****
+	// Special version of retryOnSharingViolation with workarounds for known idiotic problems with folder removal.
+	void retryFileDelete( double timeout, abort_callback & a, std::function<void()> f);
 
-class reader_membuffer_simple : public reader_membuffer_base {
-public:
-	reader_membuffer_simple(const void * ptr, t_size size, t_filetimestamp ts = filetimestamp_invalid, bool is_remote = false) : m_isRemote(is_remote), m_ts(ts) {
-		m_data.set_size_discard(size);
-		memcpy(m_data.get_ptr(), ptr, size);
-	}
-	const void * get_buffer() {return m_data.get_ptr();}
-	t_size get_buffer_size() {return m_data.get_size();}
-	t_filetimestamp get_timestamp(abort_callback & p_abort) {return m_ts;}
-	bool is_remote() {return m_isRemote;}
-private:
-	pfc::array_staticsize_t<t_uint8> m_data;
-	t_filetimestamp m_ts;
-	bool m_isRemote;
-};
+	class listDirectoryCallbackImpl : public directory_callback {
+	public:
+		listDirectoryCallbackImpl() {}
+		listDirectoryCallbackImpl( listDirectoryFunc_t f ) : m_func(f) {}
+		bool on_entry(filesystem * p_owner, abort_callback & p_abort, const char * p_url, bool p_is_subdirectory, const t_filestats & p_stats) {
+			m_func(p_url, p_stats, p_is_subdirectory);
+			return true;
+		}
+		listDirectoryFunc_t m_func;
+	};
 
-class reader_membuffer_mirror : public reader_membuffer_base
-{
-public:
-	t_filetimestamp get_timestamp(abort_callback & p_abort) {return m_timestamp;}
-	bool is_remote() {return m_remote;}
-
-	//! Returns false when the object could not be mirrored (too big) or did not need mirroring.
-	static bool g_create(service_ptr_t<file> & p_out,const service_ptr_t<file> & p_src,abort_callback & p_abort) {
-		service_ptr_t<reader_membuffer_mirror> ptr = new service_impl_t<reader_membuffer_mirror>();
-		if (!ptr->init(p_src,p_abort)) return false;
-		p_out = ptr.get_ptr();
-		return true;
-	}
-	bool get_content_type(pfc::string_base & out) {
-		if (m_contentType.is_empty()) return false;
-		out = m_contentType; return true;
-	}
-private:
-	const void * get_buffer() {return m_buffer.get_ptr();}
-	t_size get_buffer_size() {return m_buffer.get_size();}
-
-	bool init(const service_ptr_t<file> & p_src,abort_callback & p_abort) {
-		if (p_src->is_in_memory()) return false;//already buffered
-		if (!p_src->get_content_type(m_contentType)) m_contentType.reset();
-		m_remote = p_src->is_remote();
-		
-		t_size size = pfc::downcast_guarded<t_size>(p_src->get_size(p_abort));
-
-		m_buffer.set_size(size);
-
-		p_src->reopen(p_abort);
-		
-		p_src->read_object(m_buffer.get_ptr(),size,p_abort);
-
-		m_timestamp = p_src->get_timestamp(p_abort);
-
-		return true;
-	}
+#ifdef _WIN32
+	pfc::string8 winGetVolumePath(const char * fb2kPath );
+	DWORD winVolumeFlags( const char * fb2kPath );
+#endif
+}
 
 
-	t_filetimestamp m_timestamp;
-	pfc::array_t<char> m_buffer;
-	bool m_remote;
-	pfc::string8 m_contentType;
+pfc::string8 file_path_canonical(const char* src);
+pfc::string8 file_path_display(const char* src);
 
-};
-
-class reader_limited : public file_readonly {
-	service_ptr_t<file> r;
-	t_filesize begin;
-	t_filesize end;
-	
-public:
-	static file::ptr g_create(file::ptr base, t_filesize offset, t_filesize size, abort_callback & abort) {
-		service_ptr_t<reader_limited> r = new service_impl_t<reader_limited>();
-		if (offset + size < offset) throw pfc::exception_overflow();
-		r->init(base, offset, offset + size, abort);
-		return r;
-	}
-	reader_limited() {begin=0;end=0;}
-	reader_limited(const service_ptr_t<file> & p_r,t_filesize p_begin,t_filesize p_end,abort_callback & p_abort) {
-		r = p_r;
-		begin = p_begin;
-		end = p_end;
-		r->seek(begin,p_abort);
-	}
-
-	void init(const service_ptr_t<file> & p_r,t_filesize p_begin,t_filesize p_end,abort_callback & p_abort) {
-		r = p_r;
-		begin = p_begin;
-		end = p_end;
-		r->seek(begin,p_abort);
-	}
-
-	t_filetimestamp get_timestamp(abort_callback & p_abort) {return r->get_timestamp(p_abort);}
-
-	t_size read(void *p_buffer, t_size p_bytes,abort_callback & p_abort) {
-		t_filesize pos;
-		pos = r->get_position(p_abort);
-		if (p_bytes > end - pos) p_bytes = (t_size)(end - pos);
-		return r->read(p_buffer,p_bytes,p_abort);
-	}
-
-	t_filesize get_size(abort_callback & p_abort) {return end-begin;}
-
-	t_filesize get_position(abort_callback & p_abort) {
-		return r->get_position(p_abort) - begin;
-	}
-
-	void seek(t_filesize position,abort_callback & p_abort) {
-		r->seek(position+begin,p_abort);
-	}
-	bool can_seek() {return r->can_seek();}
-	bool is_remote() {return r->is_remote();}
-	
-	bool get_content_type(pfc::string_base &) {return false;}
-
-	void reopen(abort_callback & p_abort) {seek(0,p_abort);}
-};
+namespace fb2k {
+    //! Sane replacement for pfc::string_filename_ext(), which isn't safe to use in cross-platform code.
+    //! @returns Filename with extension extracted from path.
+    pfc::string8 filename_ext( const char * path );
+    pfc::string8 filename_ext( const char * path, filesystem::ptr & fs_reuse);
+    //! Sane replacement for pfc::string_filename(), which isn't safe to use in cross-platform code
+    //! @returns Filename without extension extracted from path.
+    pfc::string8 filename( const char * path );
+}
 
 class stream_reader_memblock_ref : public stream_reader
 {
@@ -220,20 +111,21 @@ private:
 	t_size m_data_size,m_pointer;
 };
 
-class stream_writer_buffer_simple : public stream_writer {
+template<typename buffer_t>
+class stream_writer_buffer_simple_t : public stream_writer {
 public:
-	void write(const void * p_buffer,t_size p_bytes,abort_callback & p_abort) {
+	void write(const void * p_buffer, t_size p_bytes, abort_callback & p_abort) {
 		p_abort.check();
 		t_size base = m_buffer.get_size();
 		if (base + p_bytes < base) throw std::bad_alloc();
 		m_buffer.set_size(base + p_bytes);
-		memcpy( (t_uint8*) m_buffer.get_ptr() + base, p_buffer, p_bytes );
+		memcpy((t_uint8*)m_buffer.get_ptr() + base, p_buffer, p_bytes);
 	}
-
-	typedef pfc::array_t<t_uint8,pfc::alloc_fast> t_buffer;
-
-	pfc::array_t<t_uint8,pfc::alloc_fast> m_buffer;
+	typedef buffer_t t_buffer; // other classes reference this
+	t_buffer m_buffer;
 };
+
+typedef stream_writer_buffer_simple_t< pfc::array_t<t_uint8, pfc::alloc_fast> > stream_writer_buffer_simple;
 
 template<class t_storage>
 class stream_writer_buffer_append_ref_t : public stream_writer
@@ -392,7 +284,15 @@ public:
 		t_uint32 size; *this >> size; data.set_size(size);
 		for(t_uint32 walk = 0; walk < size; ++walk) *this >> data[walk];
 	}
-
+	void read_string_nullterm( pfc::string_base & ret ) {
+		m_stream.read_string_nullterm( ret, m_abort );
+	}
+    pfc::string8 read_string_nullterm() {
+        pfc::string8 ret; this->read_string_nullterm(ret); return ret;
+    }
+    pfc::string8 read_string() {
+        return m_stream.read_string(m_abort);
+    }
 	stream_reader & m_stream;
 	abort_callback & m_abort;
 };
@@ -435,50 +335,46 @@ public:
 		*this << pfc::downcast_guarded<t_uint32>(len);
 		write_raw(str, len);
 	}
+	void write_string_nullterm( const char * str ) {
+		this->write_raw( str, strlen(str)+1 );
+	}
 
 	stream_writer & m_stream;
 	abort_callback & m_abort;
 };
 
-#define __DECLARE_UINT_OVERLOADS(TYPE)	\
-	template<bool isBigEndian> inline stream_reader_formatter<isBigEndian> & operator>>(stream_reader_formatter<isBigEndian> & p_stream,TYPE & p_int) {p_stream.read_int(p_int); return p_stream;}	\
-	template<bool isBigEndian> inline stream_writer_formatter<isBigEndian> & operator<<(stream_writer_formatter<isBigEndian> & p_stream,TYPE p_int) {p_stream.write_int(p_int); return p_stream;}
-
-__DECLARE_UINT_OVERLOADS(t_uint8);
-__DECLARE_UINT_OVERLOADS(t_uint16);
-__DECLARE_UINT_OVERLOADS(t_uint32);
-__DECLARE_UINT_OVERLOADS(t_uint64);
-
-#ifdef _MSC_VER
-//SPECIAL FIX
-__DECLARE_UINT_OVERLOADS(unsigned long);
-#endif
-
-#undef __DECLARE_UINT_OVERLOADS
 
 #define __DECLARE_INT_OVERLOADS(TYPE)	\
 	template<bool isBigEndian> inline stream_reader_formatter<isBigEndian> & operator>>(stream_reader_formatter<isBigEndian> & p_stream,TYPE & p_int) {typename pfc::sized_int_t<sizeof(TYPE)>::t_unsigned temp;p_stream.read_int(temp); p_int = (TYPE) temp; return p_stream;}	\
 	template<bool isBigEndian> inline stream_writer_formatter<isBigEndian> & operator<<(stream_writer_formatter<isBigEndian> & p_stream,TYPE p_int) {p_stream.write_int((typename pfc::sized_int_t<sizeof(TYPE)>::t_unsigned)p_int); return p_stream;}
 
-__DECLARE_INT_OVERLOADS(t_int8);
-__DECLARE_INT_OVERLOADS(t_int16);
-__DECLARE_INT_OVERLOADS(t_int32);
-__DECLARE_INT_OVERLOADS(t_int64);
+__DECLARE_INT_OVERLOADS(char);
+__DECLARE_INT_OVERLOADS(signed char);
+__DECLARE_INT_OVERLOADS(unsigned char);
+__DECLARE_INT_OVERLOADS(signed short);
+__DECLARE_INT_OVERLOADS(unsigned short);
 
-#ifdef _MSC_VER
-//SPECIAL FIX
-__DECLARE_INT_OVERLOADS(long);
-#endif
+__DECLARE_INT_OVERLOADS(signed int);
+__DECLARE_INT_OVERLOADS(unsigned int);
+
+__DECLARE_INT_OVERLOADS(signed long);
+__DECLARE_INT_OVERLOADS(unsigned long);
+
+__DECLARE_INT_OVERLOADS(signed long long);
+__DECLARE_INT_OVERLOADS(unsigned long long);
+
+__DECLARE_INT_OVERLOADS(wchar_t);
+
 
 #undef __DECLARE_INT_OVERLOADS
 
-template<typename TVal> class __IsTypeByte {
+template<typename TVal> class _IsTypeByte {
 public:
-	enum {value = pfc::is_same_type<TVal,t_int8>::value || pfc::is_same_type<TVal,t_uint8>::value};
+	enum {value = pfc::is_same_type<TVal,char>::value || pfc::is_same_type<TVal,unsigned char>::value || pfc::is_same_type<TVal,signed char>::value};
 };
 
 template<bool isBigEndian,typename TVal,size_t Count> stream_reader_formatter<isBigEndian> & operator>>(stream_reader_formatter<isBigEndian> & p_stream,TVal (& p_array)[Count]) {
-	if (__IsTypeByte<TVal>::value) {
+	if (_IsTypeByte<TVal>::value) {
 		p_stream.read_raw(p_array,Count);
 	} else {
 		for(t_size walk = 0; walk < Count; ++walk) p_stream >> p_array[walk];
@@ -487,7 +383,7 @@ template<bool isBigEndian,typename TVal,size_t Count> stream_reader_formatter<is
 }
 
 template<bool isBigEndian,typename TVal,size_t Count> stream_writer_formatter<isBigEndian> & operator<<(stream_writer_formatter<isBigEndian> & p_stream,TVal const (& p_array)[Count]) {
-	if (__IsTypeByte<TVal>::value) {
+	if (_IsTypeByte<TVal>::value) {
 		p_stream.write_raw(p_array,Count);
 	} else {
 		for(t_size walk = 0; walk < Count; ++walk) p_stream << p_array[walk];
@@ -572,21 +468,20 @@ FB2K_STREAM_READER_OVERLOAD(bool) {
 template<bool BE = false>
 class stream_writer_formatter_simple : public stream_writer_formatter<BE> {
 public:
-	stream_writer_formatter_simple() : stream_writer_formatter(_m_stream,_m_abort), m_buffer(_m_stream.m_buffer) {}
+	stream_writer_formatter_simple() : stream_writer_formatter<BE>(_m_stream,fb2k::noAbort), m_buffer(_m_stream.m_buffer) {}
 
 	typedef stream_writer_buffer_simple::t_buffer t_buffer;
 	t_buffer & m_buffer;
 private:
 	stream_writer_buffer_simple _m_stream;
-	abort_callback_dummy _m_abort;
 };
 
 template<bool BE = false>
 class stream_reader_formatter_simple_ref : public stream_reader_formatter<BE> {
 public:
-	stream_reader_formatter_simple_ref(const void * source, t_size sourceSize) : stream_reader_formatter(_m_stream,_m_abort), _m_stream(source,sourceSize) {}
-	template<typename TSource> stream_reader_formatter_simple_ref(const TSource& source) : stream_reader_formatter(_m_stream,_m_abort), _m_stream(source) {}
-	stream_reader_formatter_simple_ref() : stream_reader_formatter(_m_stream,_m_abort) {}
+	stream_reader_formatter_simple_ref(const void * source, t_size sourceSize) : stream_reader_formatter<BE>(_m_stream,fb2k::noAbort), _m_stream(source,sourceSize) {}
+	template<typename TSource> stream_reader_formatter_simple_ref(const TSource& source) : stream_reader_formatter<BE>(_m_stream,fb2k::noAbort), _m_stream(source) {}
+	stream_reader_formatter_simple_ref() : stream_reader_formatter<BE>(_m_stream,fb2k::noAbort) {}
 
 	void set_data(const void * source, t_size sourceSize) {_m_stream.set_data(source,sourceSize);}
 	template<typename TSource> void set_data(const TSource & source) {_m_stream.set_data(source);}
@@ -597,7 +492,6 @@ public:
 	const void * get_ptr_() const {return _m_stream.get_ptr_();}
 private:
 	stream_reader_memblock_ref _m_stream;
-	abort_callback_dummy _m_abort;
 };
 
 template<bool BE = false>
@@ -659,8 +553,62 @@ private:
 
 
 
-#define FB2K_RETRY_ON_SHARING_VIOLATION(OP, ABORT, TIMEOUT) \
+#define FB2K_RETRY_ON_EXCEPTION(OP, ABORT, TIMEOUT, EXCEPTION) \
 	{	\
 		pfc::lores_timer timer; timer.start();	\
-		for(;;) try { {OP;} break; } catch(exception_io_sharing_violation) { if (timer.query() > TIMEOUT) throw; ABORT.sleep(0.01); }	\
+		for(;;) {	\
+			try { {OP;} break;	}	\
+			catch(const EXCEPTION &) { if (timer.query() > TIMEOUT) throw;}	\
+			ABORT.sleep(0.05);	\
+		}	\
 	}
+
+#define FB2K_RETRY_ON_EXCEPTION2(OP, ABORT, TIMEOUT, EXCEPTION1, EXCEPTION2) \
+	{	\
+		pfc::lores_timer timer; timer.start();	\
+		for(;;) {	\
+			try { {OP;} break;	}	\
+			catch(const EXCEPTION1 &) { if (timer.query() > TIMEOUT) throw;}	\
+			catch(const EXCEPTION2 &) { if (timer.query() > TIMEOUT) throw;}	\
+			ABORT.sleep(0.05);	\
+		}	\
+	}
+
+#define FB2K_RETRY_ON_EXCEPTION3(OP, ABORT, TIMEOUT, EXCEPTION1, EXCEPTION2, EXCEPTION3) \
+	{	\
+		pfc::lores_timer timer; timer.start();	\
+		for(;;) {	\
+			try { {OP;} break;	}	\
+			catch(const EXCEPTION1 &) { if (timer.query() > TIMEOUT) throw;}	\
+			catch(const EXCEPTION2 &) { if (timer.query() > TIMEOUT) throw;}	\
+			catch(const EXCEPTION3 &) { if (timer.query() > TIMEOUT) throw;}	\
+			ABORT.sleep(0.05);	\
+		}	\
+	}
+
+#define FB2K_RETRY_ON_SHARING_VIOLATION(OP, ABORT, TIMEOUT) FB2K_RETRY_ON_EXCEPTION(OP, ABORT, TIMEOUT, exception_io_sharing_violation)
+
+// **** WINDOWS SUCKS ****
+// File move ops must be retried on all these because you get access-denied when someone is holding open handles to something you're trying to move, or already-exists on something you just told Windows to move away
+#define FB2K_RETRY_FILE_MOVE(OP, ABORT, TIMEOUT) FB2K_RETRY_ON_EXCEPTION3(OP, ABORT, TIMEOUT, exception_io_sharing_violation, exception_io_denied, exception_io_already_exists)
+	
+class fileRestorePositionScope {
+public:
+	fileRestorePositionScope(file::ptr f, abort_callback & a) : m_file(f), m_abort(a) {
+		m_offset = f->get_position(a);
+	}
+	~fileRestorePositionScope() {
+		try {
+			if (!m_abort.is_aborting()) m_file->seek(m_offset, m_abort);
+		} catch(...) {}
+	}
+private:
+	file::ptr m_file;
+	t_filesize m_offset;
+	abort_callback & m_abort;
+};
+
+
+//! Debug self-test function for testing a file object implementation, performs various behavior validity checks, random access etc. Output goes to fb2k console.
+//! Returns true on success, false on failure (buggy file object implementation).
+bool fb2kFileSelfTest(file::ptr f, abort_callback & aborter);

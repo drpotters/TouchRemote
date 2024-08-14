@@ -2,29 +2,31 @@
 #define _SHARED_DLL__SHARED_H_
 
 #include "../../pfc/pfc.h"
+
+#include <assert.h>
+
+// Global flag - whether it's OK to leak static objects as they'll be released anyway by process death
+#define FB2K_LEAK_STATIC_OBJECTS PFC_LEAK_STATIC_OBJECTS 
+
+#define FB2K_TARGET_MICROSOFT_STORE 0
+
+#if defined(_WIN32) && ! FB2K_TARGET_MICROSOFT_STORE
+#define FB2K_SUPPORT_CRASH_LOGS 1
+#endif
+#ifndef FB2K_SUPPORT_CRASH_LOGS
+#define FB2K_SUPPORT_CRASH_LOGS 0
+#endif
+
 #include <signal.h>
 
-#ifndef WIN32
-#error N/A
-#endif
 
-#ifndef STRICT
-#define STRICT
-#endif
-
+#ifdef _WIN32
 #include <windows.h>
 #include <ddeml.h>
 #include <commctrl.h>
 #include <uxtheme.h>
-#include <tmschema.h>
-
-#ifndef NOTHROW
-#ifdef _MSC_VER
-#define NOTHROW __declspec(nothrow)
-#else
-#define NOTHROW
-#endif
-#endif
+//#include <tmschema.h>
+#include <vssym32.h>
 
 #define SHARED_API /*NOTHROW*/ __stdcall
 
@@ -34,43 +36,63 @@
 #define SHARED_EXPORT __declspec(dllexport) SHARED_API
 #endif
 
+#else // _WIN32
+
+#define SHARED_API
+#define SHARED_EXPORT
+
+#endif // _WIN32
+
 extern "C" {
 
-//SHARED_EXPORT BOOL IsUnicode();
-#ifdef UNICODE
-#define IsUnicode() 1
+#ifdef _WIN32
+	typedef HANDLE uSortString_t;
 #else
-#define IsUnicode() 0
+	typedef void* uSortString_t;
 #endif
 
+// Implemented for non-Windows as well
+void SHARED_EXPORT uOutputDebugString(const char * msg);
+unsigned SHARED_EXPORT uCharLower(unsigned c);
+unsigned SHARED_EXPORT uCharUpper(unsigned c);
+int SHARED_EXPORT uStringCompare(const char * elem1, const char * elem2);
+int SHARED_EXPORT uCharCompare(t_uint32 p_char1,t_uint32 p_char2);
+uSortString_t SHARED_EXPORT uSortStringCreate(const char * src);
+int SHARED_EXPORT uSortStringCompare(uSortString_t string1,uSortString_t string2);
+int SHARED_EXPORT uSortStringCompareEx(uSortString_t string1,uSortString_t string2,uint32_t flags);//flags - see win32 CompareString
+int SHARED_EXPORT uSortPathCompare(uSortString_t string1,uSortString_t string2);
+void SHARED_EXPORT uSortStringFree(uSortString_t string);
+pfc::eventHandle_t SHARED_EXPORT GetInfiniteWaitEvent();
+} // extern "C"
+
+#ifdef _WIN32
+extern "C" {
 LRESULT SHARED_EXPORT uSendMessageText(HWND wnd,UINT msg,WPARAM wp,const char * text);
 LRESULT SHARED_EXPORT uSendDlgItemMessageText(HWND wnd,UINT id,UINT msg,WPARAM wp,const char * text);
 BOOL SHARED_EXPORT uGetWindowText(HWND wnd,pfc::string_base & out);
 BOOL SHARED_EXPORT uSetWindowText(HWND wnd,const char * p_text);
-BOOL SHARED_EXPORT uSetWindowTextEx(HWND wnd,const char * p_text,unsigned p_text_length);
+BOOL SHARED_EXPORT uSetWindowTextEx(HWND wnd,const char * p_text,size_t p_text_length);
 BOOL SHARED_EXPORT uGetDlgItemText(HWND wnd,UINT id,pfc::string_base & out);
 BOOL SHARED_EXPORT uSetDlgItemText(HWND wnd,UINT id,const char * p_text);
-BOOL SHARED_EXPORT uSetDlgItemTextEx(HWND wnd,UINT id,const char * p_text,unsigned p_text_length);
+BOOL SHARED_EXPORT uSetDlgItemTextEx(HWND wnd,UINT id,const char * p_text,size_t p_text_length);
 BOOL SHARED_EXPORT uBrowseForFolder(HWND parent,const char * title,pfc::string_base & out);
 BOOL SHARED_EXPORT uBrowseForFolderWithFile(HWND parent,const char * title,pfc::string_base & out,const char * p_file_to_find);
 int SHARED_EXPORT uMessageBox(HWND wnd,const char * text,const char * caption,UINT type);
-void SHARED_EXPORT uOutputDebugString(const char * msg);
 BOOL SHARED_EXPORT uAppendMenu(HMENU menu,UINT flags,UINT_PTR id,const char * content);
 BOOL SHARED_EXPORT uInsertMenu(HMENU menu,UINT position,UINT flags,UINT_PTR id,const char * content);
-int SHARED_EXPORT uStringCompare(const char * elem1, const char * elem2);
-int SHARED_EXPORT uCharCompare(t_uint32 p_char1,t_uint32 p_char2);
 int SHARED_EXPORT uStringCompare_ConvertNumbers(const char * elem1,const char * elem2);
 HINSTANCE SHARED_EXPORT uLoadLibrary(const char * name);
 HANDLE SHARED_EXPORT uCreateEvent(LPSECURITY_ATTRIBUTES lpEventAttributes,BOOL bManualReset,BOOL bInitialState, const char * lpName);
-HANDLE SHARED_EXPORT GetInfiniteWaitEvent();
 DWORD SHARED_EXPORT uGetModuleFileName(HMODULE hMod,pfc::string_base & out);
 BOOL SHARED_EXPORT uSetClipboardString(const char * ptr);
 BOOL SHARED_EXPORT uGetClipboardString(pfc::string_base & out);
 BOOL SHARED_EXPORT uSetClipboardRawData(UINT format,const void * ptr,t_size size);//does not empty the clipboard
 BOOL SHARED_EXPORT uGetClassName(HWND wnd,pfc::string_base & out);
 t_size SHARED_EXPORT uCharLength(const char * src);
+#ifdef DragQueryFile // don't declare if relevant Windows #include has been omitted, breaks on HDROP
 BOOL SHARED_EXPORT uDragQueryFile(HDROP hDrop,UINT idx,pfc::string_base & out);
 UINT SHARED_EXPORT uDragQueryFileCount(HDROP hDrop);
+#endif
 BOOL SHARED_EXPORT uGetTextExtentPoint32(HDC dc,const char * text,UINT cb,LPSIZE size);//note, cb is number of bytes, not actual unicode characters in the string (read: plain strlen() will do)
 BOOL SHARED_EXPORT uExtTextOut(HDC dc,int x,int y,UINT flags,const RECT * rect,const char * text,UINT cb,const int * lpdx);
 BOOL SHARED_EXPORT uTextOutColors(HDC dc,const char * src,UINT len,int x,int y,const RECT * clip,BOOL is_selected,DWORD default_color);
@@ -101,21 +123,29 @@ BOOL SHARED_EXPORT uFixPathCaps(const char * path,pfc::string_base & p_out);
 void SHARED_EXPORT uGetCommandLine(pfc::string_base & out);
 BOOL SHARED_EXPORT uGetTempPath(pfc::string_base & out);
 BOOL SHARED_EXPORT uGetTempFileName(const char * path_name,const char * prefix,UINT unique,pfc::string_base & out);
+
+//! Win32 GetOpenFileName/GetSaveFileName wrapper. \n
+//! Extension mask uses | instead of \0 for delimiter; "Text files|*.txt|foo files|*.foo"
 BOOL SHARED_EXPORT uGetOpenFileName(HWND parent,const char * p_ext_mask,unsigned def_ext_mask,const char * p_def_ext,const char * p_title,const char * p_directory,pfc::string_base & p_filename,BOOL b_save);
-//note: uGetOpenFileName extension mask uses | as separator, not null
+
 HANDLE SHARED_EXPORT uLoadImage(HINSTANCE hIns,const char * name,UINT type,int x,int y,UINT flags);
 UINT SHARED_EXPORT uRegisterClipboardFormat(const char * name);
 BOOL SHARED_EXPORT uGetClipboardFormatName(UINT format,pfc::string_base & out);
 BOOL SHARED_EXPORT uFormatSystemErrorMessage(pfc::string_base & p_out,DWORD p_code);
 
-HANDLE SHARED_EXPORT uSortStringCreate(const char * src);
-int SHARED_EXPORT uSortStringCompare(HANDLE string1,HANDLE string2);
-int SHARED_EXPORT uSortStringCompareEx(HANDLE string1,HANDLE string2,DWORD flags);//flags - see win32 CompareString
-int SHARED_EXPORT uSortPathCompare(HANDLE string1,HANDLE string2);
-void SHARED_EXPORT uSortStringFree(HANDLE string);
+// New in 1.1.12
+HANDLE SHARED_EXPORT CreateFileAbortable(    __in     LPCWSTR lpFileName,
+    __in     DWORD dwDesiredAccess,
+    __in     DWORD dwShareMode,
+    __in_opt LPSECURITY_ATTRIBUTES lpSecurityAttributes,
+    __in     DWORD dwCreationDisposition,
+    __in     DWORD dwFlagsAndAttributes,
+	// Template file handle NOT supported.
+	__in_opt HANDLE hAborter
+	);
 
 
-int SHARED_EXPORT uCompareString(DWORD flags,const char * str1,unsigned len1,const char * str2,unsigned len2);
+int SHARED_EXPORT uCompareString(DWORD flags,const char * str1,size_t len1,const char * str2,size_t len2);
 
 class NOVTABLE uGetOpenFileNameMultiResult : public pfc::list_base_const_t<const char*>
 {
@@ -201,10 +231,10 @@ int SHARED_EXPORT uTabCtrl_SetItem(HWND wnd,t_size idx,const uTCITEM * item);
 
 int SHARED_EXPORT uGetKeyNameText(LONG lparam,pfc::string_base & out);
 
-void SHARED_EXPORT uFixAmpersandChars(const char * src,pfc::string_base & out);//for notification area icon
+void SHARED_EXPORT uFixAmpersandChars(const char * src,pfc::string_base & out);//for system tray icon
 void SHARED_EXPORT uFixAmpersandChars_v2(const char * src,pfc::string_base & out);//for other controls
 
-//deprecated
+#if FB2K_SUPPORT_CRASH_LOGS
 t_size SHARED_EXPORT uPrintCrashInfo(LPEXCEPTION_POINTERS param,const char * extrainfo,char * out);
 enum {uPrintCrashInfo_max_length = 1024};
 
@@ -213,11 +243,10 @@ void SHARED_EXPORT uPrintCrashInfo_SetComponentList(const char * p_info);//calle
 void SHARED_EXPORT uPrintCrashInfo_AddEnvironmentInfo(const char * p_info);//called only by the exe on startup
 void SHARED_EXPORT uPrintCrashInfo_SetDumpPath(const char * name);//called only by the exe on startup
 
+
+#endif // FB2K_SUPPORT_CRASH_LOGS
+
 void SHARED_EXPORT uDumpCrashInfo(LPEXCEPTION_POINTERS param);
-
-
-
-void SHARED_EXPORT uPrintCrashInfo_OnEvent(const char * message, t_size length);
 
 BOOL SHARED_EXPORT uListBox_GetText(HWND listbox,UINT index,pfc::string_base & out);
 
@@ -241,139 +270,38 @@ HRSRC SHARED_EXPORT uFindResource(HMODULE hMod,const char * name,const char * ty
 
 BOOL SHARED_EXPORT uLoadString(HINSTANCE ins,UINT id,pfc::string_base & out);
 
-UINT SHARED_EXPORT uCharLower(UINT c);
-UINT SHARED_EXPORT uCharUpper(UINT c);
-
 BOOL SHARED_EXPORT uGetMenuString(HMENU menu,UINT id,pfc::string_base & out,UINT flag);
 BOOL SHARED_EXPORT uModifyMenu(HMENU menu,UINT id,UINT flags,UINT newitem,const char * data);
 UINT SHARED_EXPORT uGetMenuItemType(HMENU menu,UINT position);
 
 
+// New in 1.3.4
+// Load a system library safely - forcibly look in system directories, not elsewhere.
+HMODULE SHARED_EXPORT LoadSystemLibrary(const TCHAR * name);
+
+void SHARED_EXPORT uPrintCrashInfo_OnEvent(const char * message, t_size length);
+void SHARED_EXPORT uPrintCrashInfo_StartLogging(const char * path);
+
 }//extern "C"
+
 
 inline char * uCharNext(char * src) {return src+uCharLength(src);}
 inline const char * uCharNext(const char * src) {return src+uCharLength(src);}
 
 
-class string_utf8_from_window
-{
-public:
-	string_utf8_from_window(HWND wnd)
-	{
-		uGetWindowText(wnd,m_data);
-	}
-	string_utf8_from_window(HWND wnd,UINT id)
-	{
-		uGetDlgItemText(wnd,id,m_data);
-	}
-	inline operator const char * () const {return m_data.get_ptr();}
-	inline t_size length() const {return m_data.length();}
-	inline bool is_empty() const {return length() == 0;}
-	inline const char * get_ptr() const {return m_data.get_ptr();}
-private:
-	pfc::string8 m_data;
-};
-
-static pfc::string uGetWindowText(HWND wnd) {
+inline pfc::string uGetWindowText(HWND wnd) {
 	pfc::string8 temp;
-	if (!uGetWindowText(wnd,temp)) return "";
-	return temp.toString();
+	if (!uGetWindowText(wnd,temp)) temp = "";
+	return temp;
 }
-static pfc::string uGetDlgItemText(HWND wnd,UINT id) {
+
+inline pfc::string uGetDlgItemText(HWND wnd,UINT id) {
 	pfc::string8 temp;
-	if (!uGetDlgItemText(wnd,id,temp)) return "";
-	return temp.toString();
+	if (!uGetDlgItemText(wnd,id,temp)) temp = "";
+	return temp;
 }
 
 #define uMAKEINTRESOURCE(x) ((const char*)LOWORD(x))
-
-#ifdef _DEBUG
-class critical_section {
-private:
-	CRITICAL_SECTION sec;
-	int count;
-public:
-	int enter() {EnterCriticalSection(&sec);return ++count;}
-	int leave() {int rv = --count;LeaveCriticalSection(&sec);return rv;}
-	int get_lock_count() {return count;}
-	int get_lock_count_check() {enter();return leave();}
-	inline void assert_locked() {assert(get_lock_count_check()>0);}
-	inline void assert_not_locked() {assert(get_lock_count_check()==0);}
-	critical_section() {InitializeCriticalSection(&sec);count=0;}
-	~critical_section() {DeleteCriticalSection(&sec);}
-private:
-	critical_section(const critical_section&) {throw pfc::exception_not_implemented();}
-	const critical_section & operator=(const critical_section &) {throw pfc::exception_not_implemented();}
-};
-#else
-class critical_section {
-private:
-	CRITICAL_SECTION sec;
-public:
-	void enter() throw() {EnterCriticalSection(&sec);}
-	void leave() throw() {LeaveCriticalSection(&sec);}
-	critical_section() {InitializeCriticalSection(&sec);}
-	~critical_section() {DeleteCriticalSection(&sec);}
-private:
-	critical_section(const critical_section&) {throw pfc::exception_not_implemented();}
-	const critical_section & operator=(const critical_section &) {throw pfc::exception_not_implemented();}
-};
-#endif
-class c_insync
-{
-private:
-	critical_section & m_section;
-public:
-	c_insync(critical_section * p_section) throw() : m_section(*p_section) {m_section.enter();}
-	c_insync(critical_section & p_section) throw() : m_section(p_section) {m_section.enter();}
-	~c_insync() throw() {m_section.leave();}
-};
-
-#define insync(X) c_insync blah____sync(X)
-
-
-class critical_section2	//smarter version, has try_enter()
-{
-private:
-	HANDLE hMutex;
-	int count;
-public:
-	int enter() {return enter_timeout(INFINITE);}
-	int leave() {int rv = --count;ReleaseMutex(hMutex);return rv;}
-	int get_lock_count() {return count;}
-	int get_lock_count_check()
-	{
-		int val = try_enter();
-		if (val>0) val = leave();
-		return val;
-	}
-	int enter_timeout(DWORD t) {return WaitForSingleObject(hMutex,t)==WAIT_OBJECT_0 ? ++count : 0;}
-	int try_enter() {return enter_timeout(0);}
-	int check_count() {enter();return leave();}
-	critical_section2()
-	{
-		hMutex = uCreateMutex(0,0,0);
-		count=0;
-	}
-	~critical_section2() {CloseHandle(hMutex);}
-
-	inline void assert_locked() {assert(get_lock_count_check()>0);}
-	inline void assert_not_locked() {assert(get_lock_count_check()==0);}
-
-};
-
-class c_insync2
-{
-private:
-	critical_section2 * ptr;
-public:
-	c_insync2(critical_section2 * p) {ptr=p;ptr->enter();}
-	c_insync2(critical_section2 & p) {ptr=&p;ptr->enter();}
-	~c_insync2() {ptr->leave();}
-};
-
-#define insync2(X) c_insync2 blah____sync2(X)
-
 
 //other
 
@@ -421,72 +349,17 @@ public:
 private:
 	pfc::string8_fastalloc m_data;
 };
-#pragma deprecated(uStringPrintf, uPrintf, uPrintfV)
 
 inline LRESULT uButton_SetCheck(HWND wnd,UINT id,bool state) {return uSendDlgItemMessage(wnd,id,BM_SETCHECK,state ? BST_CHECKED : BST_UNCHECKED,0); }
 inline bool uButton_GetCheck(HWND wnd,UINT id) {return uSendDlgItemMessage(wnd,id,BM_GETCHECK,0,0) == BST_CHECKED;}
 
-class uCallStackTracker
+inline BOOL uGetLongPathNameEx(const char * name,pfc::string_base & out)
 {
-	t_size param;
-public:
-	explicit SHARED_EXPORT uCallStackTracker(const char * name);
-	SHARED_EXPORT ~uCallStackTracker();
-};
-
-extern "C"
-{
-	LPCSTR SHARED_EXPORT uGetCallStackPath();
+    if (uGetLongPathName(name,out)) return TRUE;
+    return uGetFullPathName(name,out);
 }
 
-namespace pfc {
-	class formatBugCheck : public string_formatter {
-	public:
-		formatBugCheck(const char * msg) {
-			*this << msg;
-			const char * path = uGetCallStackPath();
-			if (*path) {
-				*this << " (at: " << path << ")";
-			}
-		}
-	};
-	class exception_bug_check_v2 : public exception_bug_check {
-	public:
-		exception_bug_check_v2(const char * msg = exception_bug_check::g_what()) : exception_bug_check(formatBugCheck(msg)) {
-			PFC_ASSERT(!"exception_bug_check_v2 triggered");
-		}
-	};
-}
-
-static int uExceptFilterProc_inline(LPEXCEPTION_POINTERS param) {
-	uDumpCrashInfo(param);
-	TerminateProcess(GetCurrentProcess(), 0);
-	return 0;// never reached
-}
-
-#if !defined(FOOBAR2000_TARGET_VERSION) || FOOBAR2000_TARGET_VERSION >= 76
-extern "C" {
-	LONG SHARED_EXPORT uExceptFilterProc(LPEXCEPTION_POINTERS param);
-	PFC_NORETURN void SHARED_EXPORT uBugCheck();
-}
-#else
-#define uExceptFilterProc uExceptFilterProc_inline
-#define uBugCheck() {throw pfc::exception_bug_check_v2(msg);}
-#endif
-
-#define __except_instacrash __except(uExceptFilterProc(GetExceptionInformation()))
-#define fb2k_instacrash_scope(X) __try { X; } __except_instacrash {}
-
-
-#if 1
-#define TRACK_CALL(X) uCallStackTracker TRACKER__##X(#X)
-#define TRACK_CALL_TEXT(X) uCallStackTracker TRACKER__BLAH(X)
-#define TRACK_CODE(description,code) {uCallStackTracker __call_tracker(description); code;}
-#else
-#define TRACK_CALL(X)
-#define TRACK_CALL_TEXT(X)
-#define TRACK_CODE(description,code) {code;}
-#endif
+#endif // _WIN32
 
 extern "C" {
 int SHARED_EXPORT stricmp_utf8(const char * p1,const char * p2) throw();
@@ -545,13 +418,7 @@ private:
 	pfc::string8 m_data;
 };
 
-
-inline BOOL uGetLongPathNameEx(const char * name,pfc::string_base & out)
-{
-	if (uGetLongPathName(name,out)) return TRUE;
-	return uGetFullPathName(name,out);
-}
-
+#ifdef _WIN32
 struct t_font_description
 {
 	enum
@@ -618,7 +485,7 @@ extern "C" {
 	void SHARED_EXPORT PokeWindow(HWND p_wnd);
 };
 
-static bool ModalDialogPrologue() {
+inline bool ModalDialogPrologue() {
 	bool rv = ModalDialog_CanCreateNew();
 	if (!rv) ModalDialog_PokeExisting();
 	return rv;
@@ -663,206 +530,64 @@ public:
 	
 
 private:
-	modal_dialog_scope(const modal_dialog_scope & p_scope) {assert(0);}
-	const modal_dialog_scope & operator=(const modal_dialog_scope &) {assert(0); return *this;}
+	modal_dialog_scope(const modal_dialog_scope & p_scope) = delete;
+	const modal_dialog_scope & operator=(const modal_dialog_scope &) = delete;
 
 	t_modal_dialog_entry m_entry;
 
 	bool m_initialized;
 };
 
-class LastErrorRevertScope {
-public:
-	LastErrorRevertScope() : m_val(GetLastError()) {}
-	~LastErrorRevertScope() {SetLastError(m_val);}
-
-private:
-	const DWORD m_val;
-};
-
-class format_win32_error {
-public:
-	format_win32_error(DWORD p_code) {
-		LastErrorRevertScope revert;
-		if (p_code == 0) m_buffer = "Undefined error";
-		else if (!uFormatSystemErrorMessage(m_buffer,p_code)) m_buffer << "Unknown error code (" << (unsigned)p_code << ")";
-	}
-
-	const char * get_ptr() const {return m_buffer.get_ptr();}
-	operator const char*() const {return m_buffer.get_ptr();}
-private:
-	pfc::string8 m_buffer;
-};
-
-class format_hresult {
-public:
-	format_hresult(HRESULT p_code) {
-		if (!uFormatSystemErrorMessage(m_buffer,(DWORD)p_code)) m_buffer = "Unknown error code";
-		stamp_hex(p_code);
-	}
-	format_hresult(HRESULT p_code, const char * msgOverride) {
-		m_buffer = msgOverride;
-		stamp_hex(p_code);
-	}
-
-	const char * get_ptr() const {return m_buffer.get_ptr();}
-	operator const char*() const {return m_buffer.get_ptr();}
-private:
-	void stamp_hex(HRESULT p_code) {m_buffer << " (0x" << pfc::format_hex((t_uint32)p_code, 8) << ")";}
-	pfc::string_formatter m_buffer;
-};
-
-struct exception_win32 : public std::exception {
-	exception_win32(DWORD p_code) : std::exception(format_win32_error(p_code)), m_code(p_code) {}
-	DWORD get_code() const {return m_code;}
-private:
-	DWORD m_code;
-};
-
-class uDebugLog : public pfc::string_formatter {
-public:
-	~uDebugLog() {*this << "\n"; uOutputDebugString(get_ptr());}
-};
-
-static void uAddWindowStyle(HWND p_wnd,LONG p_style) {
-	SetWindowLong(p_wnd,GWL_STYLE, GetWindowLong(p_wnd,GWL_STYLE) | p_style);
-}
-
-static void uRemoveWindowStyle(HWND p_wnd,LONG p_style) {
-	SetWindowLong(p_wnd,GWL_STYLE, GetWindowLong(p_wnd,GWL_STYLE) & ~p_style);
-}
-
-static void uAddWindowExStyle(HWND p_wnd,LONG p_style) {
-	SetWindowLong(p_wnd,GWL_EXSTYLE, GetWindowLong(p_wnd,GWL_EXSTYLE) | p_style);
-}
-
-static void uRemoveWindowExStyle(HWND p_wnd,LONG p_style) {
-	SetWindowLong(p_wnd,GWL_EXSTYLE, GetWindowLong(p_wnd,GWL_EXSTYLE) & ~p_style);
-}
-
-static unsigned MapDialogWidth(HWND p_dialog,unsigned p_value) {
-	RECT temp;
-	temp.left = 0; temp.right = p_value; temp.top = temp.bottom = 0;
-	if (!MapDialogRect(p_dialog,&temp)) return 0;
-	return temp.right;
-}
-
-static bool IsKeyPressed(unsigned vk) {
-	return (GetKeyState(vk) & 0x8000) ? true : false;
-}
-
-//! Returns current modifier keys pressed, using win32 MOD_* flags.
-static unsigned GetHotkeyModifierFlags() {
-	unsigned ret = 0;
-	if (IsKeyPressed(VK_CONTROL)) ret |= MOD_CONTROL;
-	if (IsKeyPressed(VK_SHIFT)) ret |= MOD_SHIFT;
-	if (IsKeyPressed(VK_MENU)) ret |= MOD_ALT;
-	if (IsKeyPressed(VK_LWIN) || IsKeyPressed(VK_RWIN)) ret |= MOD_WIN;
-	return ret;
-}
-
-class CClipboardOpenScope {
-public:
-	CClipboardOpenScope() : m_open(false) {}
-	~CClipboardOpenScope() {Close();}
-	bool Open(HWND p_owner) {
-		Close();
-		if (OpenClipboard(p_owner)) {
-			m_open = true;
-			return true;
-		} else {
-			return false;
-		}
-	}
-	void Close() {
-		if (m_open) {
-			m_open = false;
-			CloseClipboard();
-		}
-	}
-private:
-	bool m_open;
-	
-	PFC_CLASS_NOT_COPYABLE_EX(CClipboardOpenScope)
-};
-
-class CGlobalLockScope {
-public:
-	CGlobalLockScope(HGLOBAL p_handle) : m_handle(p_handle), m_ptr(GlobalLock(p_handle)) {
-		if (m_ptr == NULL) throw std::bad_alloc();
-	}
-	~CGlobalLockScope() {
-		if (m_ptr != NULL) GlobalUnlock(m_handle);
-	}
-	void * GetPtr() const {return m_ptr;}
-	t_size GetSize() const {return GlobalSize(m_handle);}
-private:
-	void * m_ptr;
-	HGLOBAL m_handle;
-
-	PFC_CLASS_NOT_COPYABLE_EX(CGlobalLockScope)
-};
-
-template<typename TItem> class CGlobalLockScopeT {
-public:
-	CGlobalLockScopeT(HGLOBAL handle) : m_scope(handle) {}
-	TItem * GetPtr() const {return reinterpret_cast<TItem*>(m_scope.GetPtr());}
-	t_size GetSize() const {
-		const t_size val = m_scope.GetSize();
-		PFC_ASSERT( val % sizeof(TItem) == 0 );
-		return val / sizeof(TItem);
-	}
-private:
-	CGlobalLockScope m_scope;
-};
-
-
-static bool IsPointInsideControl(const POINT& pt, HWND wnd) {
-	HWND walk = WindowFromPoint(pt);
-	for(;;) {
-		if (walk == NULL) return false;
-		if (walk == wnd) return true;
-		if (GetWindowLong(walk,GWL_STYLE) & WS_POPUP) return false;
-		walk = GetParent(walk);
-	}
-}
-
-static bool IsWindowChildOf(HWND child, HWND parent) {
-	HWND walk = child;
-	while(walk != parent && walk != NULL && (GetWindowLong(walk,GWL_STYLE) & WS_CHILD) != 0) {
-		walk = GetParent(walk);
-	}
-	return walk == parent;
-}
-
+#endif // _WIN32
 
 #include "audio_math.h"
+#ifdef _WIN32
 #include "win32_misc.h"
+#endif
 
-template<typename TPtr>
-class CoTaskMemObject {
-public:
-	CoTaskMemObject() : m_ptr() {}
+#include "fb2kdebug.h"
 
-	~CoTaskMemObject() {CoTaskMemFree(m_ptr);}
-	void Reset() {CoTaskMemFree(pfc::replace_null_t(m_ptr));}
-	TPtr * Receive() {Reset(); return &m_ptr;}
-
-	TPtr m_ptr;
-	PFC_CLASS_NOT_COPYABLE(CoTaskMemObject, CoTaskMemObject<TPtr> );
-};
+#if FB2K_LEAK_STATIC_OBJECTS
+#define FB2K_STATIC_OBJECT(TYPE, NAME) static TYPE & NAME = * new TYPE;
+#else
+#define FB2K_STATIC_OBJECT(TYPE, NAME) static TYPE NAME;
+#endif
 
 
-    
-static void __cdecl _OverrideCrtAbort_handler(int signal) {
-	const ULONG_PTR args[] = {signal};
-	RaiseException(0x6F8E1DC8 /* random GUID */, EXCEPTION_NONCONTINUABLE, _countof(args), args);
+#ifdef _MSC_VER
+#define FB2K_DEPRECATED __declspec(deprecated)
+#else
+#define FB2K_DEPRECATED
+#endif
+
+
+namespace fb2k {
+#ifdef _WIN32
+typedef HWND hwnd_t;
+typedef HICON hicon_t;
+typedef HMENU hmenu_t;
+typedef HFONT hfont_t;
+#else
+typedef void* hwnd_t; // Mac: bridged NSObject, context specific (NSWindow, NSView, NSViewController)
+typedef void* hicon_t;
+typedef void* hmenu_t;
+typedef void* hfont_t;
+#endif
+
+inline void messageBeep() {
+#ifdef _WIN32
+    MessageBeep(0);
+#endif
+}
 }
 
-static void OverrideCrtAbort() {
-	const int signals[] = {SIGINT, SIGTERM, SIGBREAK, SIGABRT};
-	for(size_t i=0; i<_countof(signals); i++) signal(signals[i], _OverrideCrtAbort_handler);
-	_set_abort_behavior(0, ~0);
-}
+#ifdef __APPLE__
+#include "shared-apple.h"
+#endif
+
+#ifndef _WIN32
+#include "shared-nix.h"
+#endif
+
 
 #endif //_SHARED_DLL__SHARED_H_

@@ -1,13 +1,15 @@
-#include "stdafx.h"
+#include "StdAfx.h"
+
+#ifdef FOOBAR2000_DESKTOP_WINDOWS
 #include "dialog_resize_helper.h"
 
-BOOL GetChildWindowRect(HWND wnd,UINT id,RECT* child)
+static BOOL GetChildWindowRect(HWND wnd, UINT id, RECT* child)
 {
 	RECT temp;
 	HWND wndChild = GetDlgItem(wnd, id);
 	if (wndChild == NULL) return FALSE;
-	if (!GetWindowRect(wndChild,&temp)) return FALSE;
-	if (!MapWindowPoints(0,wnd,(POINT*)&temp,2)) return FALSE;
+	if (!GetWindowRect(wndChild, &temp)) return FALSE;
+	if (!MapWindowPoints(0, wnd, (POINT*)&temp, 2)) return FALSE;
 	*child = temp;
 	return TRUE;
 }
@@ -29,7 +31,7 @@ void dialog_resize_helper::on_wm_size()
 {
 	if (parent)
 	{
-		unsigned count = m_table.get_size();
+		unsigned count = (unsigned) m_table.get_size();
 		if (sizegrip != 0) count++;
 		HDWP hWinPosInfo = BeginDeferWindowPos(count);
 		for(unsigned n=0;n<m_table.get_size();n++)
@@ -56,7 +58,7 @@ void dialog_resize_helper::on_wm_size()
 				else if (e.flags & Y_SIZE)
 					dest_cy += delta_y;
 				
-				DeferWindowPos(hWinPosInfo, wnd,0,dest_x,dest_y,dest_cx,dest_cy,SWP_NOZORDER);
+				hWinPosInfo = DeferWindowPos(hWinPosInfo, wnd,0,dest_x,dest_y,dest_cx,dest_cy,SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_NOACTIVATE);
 			}
 		}
 		if (sizegrip != 0)
@@ -64,7 +66,7 @@ void dialog_resize_helper::on_wm_size()
 			RECT rc, rc_grip;
 			GetClientRect(parent, &rc);
 			GetWindowRect(sizegrip, &rc_grip);
-			DeferWindowPos(hWinPosInfo, sizegrip, NULL, rc.right - (rc_grip.right - rc_grip.left), rc.bottom - (rc_grip.bottom - rc_grip.top), 0, 0, SWP_NOZORDER | SWP_NOSIZE);
+			hWinPosInfo = DeferWindowPos(hWinPosInfo, sizegrip, NULL, rc.right - (rc_grip.right - rc_grip.left), rc.bottom - (rc_grip.bottom - rc_grip.top), 0, 0, SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_NOACTIVATE | SWP_NOSIZE);
 		}
 		EndDeferWindowPos(hWinPosInfo);
 		//RedrawWindow(parent,0,0,RDW_INVALIDATE);
@@ -158,3 +160,5 @@ dialog_resize_helper::dialog_resize_helper(const param * src,unsigned count,unsi
 dialog_resize_helper::~dialog_resize_helper()
 {
 }
+
+#endif // FOOBAR2000_DESKTOP_WINDOWS

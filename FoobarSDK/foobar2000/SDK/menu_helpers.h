@@ -1,3 +1,7 @@
+#pragma once
+#include "menu.h"
+#include "contextmenu.h"
+
 namespace menu_helpers {
 #ifdef _WIN32
 	void win32_auto_mnemonics(HMENU menu);
@@ -82,7 +86,8 @@ public:
 		guid_main_next,					guid_main_previous,
 		guid_main_next_or_random,		guid_main_random,					guid_main_pause,
 		guid_main_play,					guid_main_play_or_pause,			guid_main_rg_set_album,
-		guid_main_rg_set_track,			guid_main_rg_disable,				guid_main_stop,
+		guid_main_rg_set_track,			guid_main_rg_disable,				guid_main_rg_byorder,
+		guid_main_stop,
 		guid_main_stop_after_current,	guid_main_volume_down,				guid_main_volume_up,
 		guid_main_volume_mute,			guid_main_add_directory,			guid_main_add_files,
 		guid_main_add_location,			guid_main_add_playlist,				guid_main_clear_playlist,
@@ -101,7 +106,10 @@ public:
 		guid_seek_ahead_1min,			guid_seek_ahead_2min,				guid_seek_ahead_5min,				guid_seek_ahead_10min,
 
 		guid_seek_back_1s,				guid_seek_back_5s,					guid_seek_back_10s,					guid_seek_back_30s,
-		guid_seek_back_1min,			guid_seek_back_2min,				guid_seek_back_5min,				guid_seek_back_10min
+		guid_seek_back_1min,			guid_seek_back_2min,				guid_seek_back_5min,				guid_seek_back_10min,
+
+        guid_library_configure, guid_library_rescan,
+		guid_internet_radio
 		;
 
 	static bool run_main(const GUID & guid);

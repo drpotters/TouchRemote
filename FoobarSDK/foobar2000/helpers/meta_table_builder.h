@@ -1,10 +1,12 @@
+#pragma once
+
 class _meta_table_enum_wrapper {
 public:
 	_meta_table_enum_wrapper(file_info & p_info) : m_info(p_info) {}
 	template<typename t_values>
 	void operator() (const char * p_name,const t_values & p_values) {
 		t_size index = ~0;
-		for(t_values::const_iterator iter = p_values.first(); iter.is_valid(); ++iter) {
+		for(typename t_values::const_iterator iter = p_values.first(); iter.is_valid(); ++iter) {
 			if (index == ~0) index = m_info.__meta_add_unsafe(p_name,*iter);
 			else m_info.meta_add_value(index,*iter);
 		}
@@ -21,7 +23,7 @@ public:
 		if (p_values.get_count() > 0) {
 			if (!m_info.info_set_replaygain(p_name, *p_values.first())) {
 				t_size index = ~0;
-				for(t_values::const_iterator iter = p_values.first(); iter.is_valid(); ++iter) {
+				for(typename t_values::const_iterator iter = p_values.first(); iter.is_valid(); ++iter) {
 					if (index == ~0) index = m_info.__meta_add_unsafe(p_name,*iter);
 					else m_info.meta_add_value(index,*iter);
 				}
@@ -58,16 +60,40 @@ public:
 		}
 	}
 	t_entry & add(const char * p_name) {
-		if (!file_info::g_is_valid_field_name(p_name)) throw pfc::exception_bug_check_v2();//we return a reference, nothing smarter to do
+		if (!file_info::g_is_valid_field_name(p_name)) uBugCheck();//we return a reference, nothing smarter to do
 		return _add(p_name);
+	}
+	void deduplicate(const char * name) {
+		t_entry * e;
+		if (!m_data.query_ptr(name, e)) return;
+		pfc::avltree_t<const char*, pfc::comparator_strcmp> found;
+		for(t_entry::iterator iter = e->first(); iter.is_valid(); ) {
+			t_entry::iterator next = iter; ++next;
+			const char * v = *iter;
+			if (!found.add_item_check(v)) e->remove(iter);
+			iter = next;
+		}
+	}
+	void keep_one(const char * name) {
+		t_entry * e;
+		if (!m_data.query_ptr(name, e)) return;
+		while(e->get_count() > 1) e->remove(e->last());
+	}
+	void tidy_VorbisComment() {
+		deduplicate("album artist");
+		deduplicate("publisher");
+		keep_one("totaltracks");
+		keep_one("totaldiscs");
 	}
 	void finalize(file_info & p_info) const {
 		p_info.meta_remove_all();
-		m_data.enumerate(_meta_table_enum_wrapper(p_info));
+        _meta_table_enum_wrapper e(p_info);
+		m_data.enumerate(e);
 	}
 	void finalize_withRG(file_info & p_info) const {
 		p_info.meta_remove_all(); p_info.set_replaygain(replaygain_info_invalid);
-		m_data.enumerate(_meta_table_enum_wrapper_RG(p_info));
+        _meta_table_enum_wrapper_RG e(p_info);
+		m_data.enumerate(e);
 	}
 
 	void from_info(const file_info & p_info) {
@@ -79,12 +105,10 @@ public:
 		from_info_overwrite(p_info);
 		from_RG_overwrite(p_info.get_replaygain());
 	}
-	void from_RG_overwrite(replaygain_info info) {
-		replaygain_info::t_text_buffer buffer;
-		if (info.format_album_gain(buffer)) set("replaygain_album_gain", buffer);
-		if (info.format_track_gain(buffer)) set("replaygain_track_gain", buffer);
-		if (info.format_album_peak(buffer)) set("replaygain_album_peak", buffer);
-		if (info.format_track_peak(buffer)) set("replaygain_track_peak", buffer);
+	void from_RG_overwrite(replaygain_info const & info) {
+		info.for_each([&](const char* key, const char* value) {
+			set(key, value);
+		});
 	}
 	void from_info_overwrite(const file_info & p_info) {
 		for(t_size metawalk = 0, metacount = p_info.meta_get_count(); metawalk < metacount; ++metawalk ) {
@@ -101,10 +125,15 @@ public:
 	void reset() {m_data.remove_all();}
 
 	void fix_itunes_compilation() {
-		static const char cmp[] = "itunescompilation";
-		if (m_data.have_item(cmp)) {
-			// m_data.remove(cmp);
-			if (!m_data.have_item("album artist")) add("album artist", "Various Artists");
+		auto entry = m_data.find("itunescompilation");
+		if (entry.is_valid()) {
+			auto val = entry->m_value.first();
+			if (val.is_valid()) {
+				if (atoi(val->c_str()) != 0) {
+					// m_data.remove(cmp);
+					if (!m_data.have_item("album artist")) add("album artist", "Various Artists");
+				}
+			}
 		}
 	}
 private:

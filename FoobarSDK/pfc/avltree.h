@@ -1,3 +1,7 @@
+#pragma once
+
+#include "iterators.h"
+
 namespace pfc {
 
 	template<typename t_storage>
@@ -5,15 +9,15 @@ namespace pfc {
 	public:
 		typedef _list_node<t_storage> t_node;
 		typedef _avltree_node<t_storage> t_self;
-		template<typename t_param> _avltree_node(t_param const& param) : t_node(param), m_left(), m_right(), m_depth() {}
+		template<typename t_param> _avltree_node(t_param const& param) : t_node(param) {}
 
 		typedef refcounted_object_ptr_t<t_self> t_ptr;
 		typedef t_self* t_rawptr;
 		
-		t_ptr m_left, m_right;
-		t_rawptr m_parent;
+		t_ptr m_left, m_right; // smart ptr, no init
+		t_rawptr m_parent = nullptr;
 
-		t_size m_depth;
+		t_size m_depth = 0;
 
 		void link_left(t_self* ptr) throw() {
 			m_left = ptr;
@@ -36,8 +40,8 @@ namespace pfc {
 		inline void add_ref() throw() {this->refcount_add_ref();}
 		inline void release() throw() {this->refcount_release();}
 
-		inline t_rawptr child(bool which) const throw() {return which ? &*m_right : &*m_left;}
-		inline bool which_child(const t_self* ptr) const throw() {return ptr == &*m_right;}
+		inline t_rawptr child(bool which) const throw() {return which ? m_right.get_ptr() : m_left.get_ptr();}
+		inline bool which_child(const t_self* ptr) const throw() {return ptr == m_right.get_ptr();}
 
 		
 
@@ -75,6 +79,8 @@ namespace pfc {
 		typedef avltree_t<t_storage,t_comparator> t_self;
 		typedef pfc::const_iterator<t_storage> const_iterator;
 		typedef pfc::iterator<t_storage> iterator;
+		typedef pfc::forward_iterator<t_storage> forward_iterator;
+		typedef pfc::forward_const_iterator<t_storage> forward_const_iterator;
 		typedef t_storage t_item;
 	private:
 		typedef _avltree_node<t_storage> t_node;
@@ -86,6 +92,8 @@ namespace pfc {
 		typedef typename t_node::t_rawptr t_noderawptr;
 #endif
 
+        static bool is_ptr_valid(t_nodeptr const & p) { return p.is_valid(); }
+        static bool is_ptr_valid(t_node const * p) { return p != NULL; }
 
 		template<typename t_item1,typename t_item2>
 		inline static int compare(const t_item1 & p_item1, const t_item2 & p_item2) {
@@ -114,7 +122,7 @@ namespace pfc {
 		}
 
 		static t_nodeptr extract_left_leaf(t_nodeptr & p_base) {
-			if (p_base->m_left != NULL) {
+			if (is_ptr_valid(p_base->m_left)) {
 				t_nodeptr ret = extract_left_leaf(p_base->m_left);
 				recalc_depth(p_base);
 				g_rebalance(p_base);
@@ -131,7 +139,7 @@ namespace pfc {
 		}
 
 		static t_nodeptr extract_right_leaf(t_nodeptr & p_base) {
-			if (p_base->m_right != NULL) {
+			if (is_ptr_valid(p_base->m_right)) {
 				t_nodeptr ret = extract_right_leaf(p_base->m_right);
 				recalc_depth(p_base);
 				g_rebalance(p_base);
@@ -158,8 +166,8 @@ namespace pfc {
 			} else {
 				t_nodeptr swap = extract_left_leaf(p_node->m_right);
 
-				swap->link_left(&*oldval->m_left);
-				swap->link_right(&*oldval->m_right);
+				swap->link_left(oldval->m_left.get_ptr());
+				swap->link_right(oldval->m_right.get_ptr());
 				swap->m_parent = oldval->m_parent;
 				recalc_depth(swap);
 				p_node = swap;
@@ -168,11 +176,11 @@ namespace pfc {
 		}
 
 		template<typename t_nodewalk,typename t_callback>
-		static void __enum_items_recur(t_nodewalk * p_node,t_callback & p_callback) {
-			if (p_node != NULL) {
-				__enum_items_recur<t_nodewalk>(&*p_node->m_left,p_callback);
+		static void __enum_items_recur(t_nodewalk * p_node,t_callback && p_callback) {
+			if (is_ptr_valid(p_node)) {
+				__enum_items_recur<t_nodewalk>(p_node->m_left.get_ptr(),p_callback);
 				p_callback (p_node->m_content);
-				__enum_items_recur<t_nodewalk>(&*p_node->m_right,p_callback);			
+				__enum_items_recur<t_nodewalk>(p_node->m_right.get_ptr(),p_callback);
 			}
 		}
 		template<typename t_search>
@@ -189,14 +197,16 @@ namespace pfc {
 
 			int result = compare(p_base->m_content,p_search);
 			if (result > 0) {
-				t_node * ret = g_find_or_add_node<t_search>(p_base->m_left,&*p_base,p_search,p_new);
+				t_node * ret = g_find_or_add_node<t_search>(p_base->m_left,p_base.get_ptr(),p_search,p_new);
+				PFC_ASSERT(compare(ret->m_content, p_search) == 0);
 				if (p_new) {
 					recalc_depth(p_base);
 					g_rebalance(p_base);
 				}
 				return ret;
 			} else if (result < 0) {
-				t_node * ret = g_find_or_add_node<t_search>(p_base->m_right,&*p_base,p_search,p_new);
+				t_node * ret = g_find_or_add_node<t_search>(p_base->m_right,p_base.get_ptr(),p_search,p_new);
+				PFC_ASSERT(compare(ret->m_content, p_search) == 0);
 				if (p_new) {
 					recalc_depth(p_base);
 					g_rebalance(p_base);
@@ -216,28 +226,26 @@ namespace pfc {
 		}
 
 
-		static void g_rotate_right(t_nodeptr & p_node) {
-			t_nodeptr oldroot = p_node;
-			t_nodeptr newroot = oldroot->m_right;
-			oldroot->link_child(true, &*newroot->m_left);
+		static void g_rotate_right(t_nodeptr & oldroot) {
+			t_nodeptr newroot ( oldroot->m_right );
+			oldroot->link_child(true, newroot->m_left.get_ptr());
 			newroot->m_left   = oldroot;
 			newroot->m_parent = oldroot->m_parent;
-			oldroot->m_parent = &*newroot;
+			oldroot->m_parent = newroot.get_ptr();
 			recalc_depth(oldroot);
 			recalc_depth(newroot);
-			p_node = newroot;
+			oldroot = newroot;
 		}
 
-		static void g_rotate_left(t_nodeptr & p_node) {
-			t_nodeptr oldroot = p_node;
-			t_nodeptr newroot = oldroot->m_left;
-			oldroot->link_child(false, &*newroot->m_right);
+		static void g_rotate_left(t_nodeptr & oldroot) {
+			t_nodeptr newroot ( oldroot->m_left );
+			oldroot->link_child(false, newroot->m_right.get_ptr());
 			newroot->m_right  = oldroot;
 			newroot->m_parent = oldroot->m_parent;
-			oldroot->m_parent = &*newroot;
+			oldroot->m_parent = newroot.get_ptr();
 			recalc_depth(oldroot);
 			recalc_depth(newroot);
-			p_node = newroot;
+			oldroot = newroot;
 		}
 
 		static void g_rebalance(t_nodeptr & p_node) {
@@ -265,7 +273,7 @@ namespace pfc {
 			int result = compare(p_node->m_content,p_search);
 			if (result == 0) {
 				remove_internal(p_node);
-				if (p_node != NULL) {
+				if (is_ptr_valid(p_node)) {
 					recalc_depth(p_node);
 					g_rebalance(p_node);
 				}
@@ -282,8 +290,9 @@ namespace pfc {
 		}
 
 		static void selftest(t_nodeptr const& p_node) {
+			(void)p_node;
 	#if 0 //def _DEBUG//SLOW!
-			if (p_node != NULL) {
+			if (is_ptr_valid(p_node)) {
 				selftest(p_node->m_left);
 				selftest(p_node->m_right);
 				assert_children(p_node);
@@ -297,7 +306,7 @@ namespace pfc {
 					PFC_ASSERT( p_node.get_ptr() == p_node->m_right->m_parent );
 				}
 
-				if (p_node->m_parent != NULL) {
+				if (is_ptr_valid(p_node->m_parent)) {
 					PFC_ASSERT(p_node == p_node->m_parent->m_left || p_node == p_node->m_parent->m_right);
 				}
 			}
@@ -306,8 +315,8 @@ namespace pfc {
 
 
 		static t_size calc_count(const t_node * p_node) throw() {
-			if (p_node != NULL) {
-				return 1 + calc_count(&*p_node->m_left) + calc_count(&*p_node->m_right);
+			if (is_ptr_valid(p_node)) {
+				return 1 + calc_count(p_node->m_left.get_ptr()) + calc_count(p_node->m_right.get_ptr());
 			} else {
 				return 0;
 			}
@@ -315,11 +324,11 @@ namespace pfc {
 
 		template<typename t_param>
 		t_storage * _find_item_ptr(t_param const & p_item) const {
-			t_node* ptr = &*m_root;
-			while(ptr != NULL) {
+			t_node* ptr = m_root.get_ptr();
+			while(is_ptr_valid(ptr)) {
 				int result = compare(ptr->m_content,p_item);
-				if (result > 0) ptr=&*ptr->m_left;
-				else if (result < 0) ptr=&*ptr->m_right;
+				if (result > 0) ptr=ptr->m_left.get_ptr();
+				else if (result < 0) ptr=ptr->m_right.get_ptr();
 				else return &ptr->m_content;
 			}
 			return NULL;
@@ -327,20 +336,20 @@ namespace pfc {
 
 		template<typename t_param>
 		t_node * _find_node_ptr(t_param const & p_item) const {
-			t_node* ptr = &*m_root;
-			while(ptr != NULL) {
+			t_node* ptr = m_root.get_ptr();
+			while(is_ptr_valid(ptr)) {
 				int result = compare(ptr->m_content,p_item);
-				if (result > 0) ptr=&*ptr->m_left;
-				else if (result < 0) ptr=&*ptr->m_right;
+				if (result > 0) ptr=ptr->m_left.get_ptr();
+				else if (result < 0) ptr=ptr->m_right.get_ptr();
 				else return ptr;
 			}
 			return NULL;
 		}
 
 		template<bool inclusive,bool above,typename t_search> t_storage * __find_nearest(const t_search & p_search) const {
-			t_node * ptr = &*m_root;
+			t_node * ptr = m_root.get_ptr();
 			t_storage * found = NULL;
-			while(ptr != NULL) {
+			while(is_ptr_valid(ptr)) {
 				int result = compare(ptr->m_content,p_search);
 				if (above) result = -result;
 				if (inclusive && result == 0) {
@@ -374,6 +383,18 @@ namespace pfc {
 
 		template<bool inclusive,bool above,typename t_search> t_storage * find_nearest_item(const t_search & p_search) {
 			return __find_nearest<inclusive,above>(p_search);
+		}
+
+		avltree_t( t_self && other ) {
+			m_root = std::move( other.m_root ); other.m_root.release();
+		}
+
+		const t_self & operator=( t_self && other ) {
+			move_from ( other ); return *this;
+		}
+
+		void move_from( t_self & other ) {
+			reset(); m_root = std::move( other.m_root ); other.m_root.release();
 		}
 
 		template<typename t_param>
@@ -436,6 +457,7 @@ namespace pfc {
 			_unlink_recur(m_root);
 			m_root.release();
 		}
+		void clear() throw() { remove_all(); }
 
 		bool remove(const_iterator const& iter) {
 			PFC_ASSERT(iter.is_valid());
@@ -450,19 +472,18 @@ namespace pfc {
 			return ret;
 		}
 
-		t_size get_count() const throw() {
-			return calc_count(&*m_root);
-		}
+		t_size get_count() const throw() { return calc_count(m_root.get_ptr()); }
+		size_t size() const throw() { return get_count(); }
 
 		template<typename t_callback>
-		void enumerate(t_callback & p_callback) const {
-			__enum_items_recur<const t_node>(&*m_root,p_callback);
+		void enumerate(t_callback && p_callback) const {
+			__enum_items_recur<const t_node>(m_root.get_ptr(),p_callback);
 		}
 
 		//! Allows callback to modify the tree content.
 		//! Unsafe! Caller must not modify items in a way that changes sort order!
 		template<typename t_callback>
-		void _enumerate_var(t_callback & p_callback) { __enum_items_recur<t_node>(&*m_root,p_callback); }
+		void _enumerate_var(t_callback & p_callback) { __enum_items_recur<t_node>(m_root.get_ptr(),p_callback); }
 
 		template<typename t_param> iterator insert(const t_param & p_item) {
 			bool isNew;
@@ -482,12 +503,18 @@ namespace pfc {
 		
 		
 		
-		const_iterator first() const throw() {return _firstlast(false);}
-		const_iterator last() const throw() {return _firstlast(true);}
+		const_iterator first() const noexcept {return _firstlast(false);}
+		const_iterator last() const noexcept {return _firstlast(true);}
 		//! Unsafe! Caller must not modify items in a way that changes sort order!
 		iterator _first_var() { return _firstlast(false); }
 		//! Unsafe! Caller must not modify items in a way that changes sort order!
 		iterator _last_var() { return _firstlast(true); }
+
+		const_iterator cfirst() const noexcept {return _firstlast(false);}
+		const_iterator clast() const noexcept {return _firstlast(true);}
+
+		forward_const_iterator begin() const noexcept { return first(); }
+		forward_const_iterator end() const noexcept { return forward_const_iterator(); }
 
 		template<typename t_param> bool get_first(t_param & p_item) const throw() {
 			const_iterator iter = first();
@@ -516,11 +543,11 @@ namespace pfc {
 				node->unlink();
 			}
 		}
-		t_node* _firstlast(bool which) const throw() {
-			if (m_root.is_empty()) return NULL;
-			for(t_node * walk = &*m_root; ; ) {
+		t_node* _firstlast(bool which) const noexcept {
+			if (m_root.is_empty()) return nullptr;
+			for(t_node * walk = m_root.get_ptr(); ; ) {
 				t_node * next = walk->child(which);
-				if (next == NULL) return walk;
+				if (next == nullptr) return walk;
 				PFC_ASSERT( next->m_parent == walk );
 				walk = next;
 			}
@@ -531,8 +558,8 @@ namespace pfc {
 			} else {
 				t_nodeptr newnode = new t_node(p_source->m_content);
 				newnode->m_depth = p_source->m_depth;
-				newnode->m_left = __copy_recur(&*p_source->m_left,&*newnode);
-				newnode->m_right = __copy_recur(&*p_source->m_right,&*newnode);
+				newnode->m_left = __copy_recur(p_source->m_left.get_ptr(),newnode.get_ptr());
+				newnode->m_right = __copy_recur(p_source->m_right.get_ptr(),newnode.get_ptr());
 				newnode->m_parent = parent;
 				return newnode;
 			}
@@ -540,7 +567,7 @@ namespace pfc {
 
 		void __copy(const t_self & p_other) {
 			reset();
-			m_root = __copy_recur(&*p_other.m_root,NULL);
+			m_root = __copy_recur(p_other.m_root.get_ptr(),NULL);
 			selftest(m_root);
 		}
 	};

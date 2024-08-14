@@ -1,6 +1,14 @@
+#pragma once
+
+#include <functional>
+
+#include "traits.h"
+#include "bit_array.h"
+
 #define tabsize(x) ((size_t)(sizeof(x)/sizeof(*x)))
 #define PFC_TABSIZE(x) ((size_t)(sizeof(x)/sizeof(*x)))
 
+// Retained for compatibility. Do not use. Use C++11 template<typename ... arg_t> instead.
 #define TEMPLATE_CONSTRUCTOR_FORWARD_FLOOD_WITH_INITIALIZER(THISCLASS,MEMBER,INITIALIZER)	\
 																																				THISCLASS() :																																														MEMBER() INITIALIZER	\
 	template<typename t_param1>																													THISCLASS(const t_param1 & p_param1) :																																								MEMBER(p_param1) INITIALIZER	\
@@ -15,9 +23,13 @@
 #define TEMPLATE_CONSTRUCTOR_FORWARD_FLOOD(THISCLASS,MEMBER) TEMPLATE_CONSTRUCTOR_FORWARD_FLOOD_WITH_INITIALIZER(THISCLASS,MEMBER,{})
 
 
-#ifdef _MSC_VER
+#ifdef _WIN32
 
-//Bah. I noticed the fact that std::exception carrying a custom message is MS-specific *after* making exception classes a part of ABI. To be nuked next time fb2k component backwards compatibility is axed.
+#ifndef _MSC_VER
+#error MSVC expected
+#endif
+
+// MSVC specific - part of fb2k ABI - cannot ever change on MSVC/Windows
 
 #define PFC_DECLARE_EXCEPTION(NAME,BASECLASS,DEFAULTMSG)	\
 class NAME : public BASECLASS {	\
@@ -70,7 +82,7 @@ namespace pfc {
 		}
 		char * m_message;
 	};
-	PFC_NORETURN template<typename t_exception> void throw_exception_with_message(const char * p_message) {
+	template<typename t_exception> PFC_NORETURN void throw_exception_with_message(const char * p_message) {
 		throw __exception_with_message_t<t_exception>(p_message);
 	}
 }
@@ -83,24 +95,21 @@ namespace pfc {
 
 	template<typename p_type1,typename p_type2>
 	class is_same_type { public: enum {value = false}; };
-
 	template<typename p_type>
 	class is_same_type<p_type,p_type> { public: enum {value = true}; };
-
-//	template<bool val> class static_assert;
-//	template<> class static_assert<true> {};
 
 	template<bool val> class static_assert_t;
 	template<> class static_assert_t<true> {};
 
-#define PFC_STATIC_ASSERT(X) { pfc::static_assert_t<(X)>(); }
+#define PFC_STATIC_ASSERT(X) { ::pfc::static_assert_t<(X)>(); }
 
 	template<typename t_type>
 	void assert_raw_type() {static_assert_t< !traits_t<t_type>::needs_constructor && !traits_t<t_type>::needs_destructor >();}
 
 	template<typename t_type> class assert_byte_type;
-	template<> class assert_byte_type<t_uint8> {};
-	template<> class assert_byte_type<t_int8> {};
+	template<> class assert_byte_type<char> {};
+	template<> class assert_byte_type<unsigned char> {};
+	template<> class assert_byte_type<signed char> {};
 
 
 	template<typename t_type> void __unsafe__memcpy_t(t_type * p_dst,const t_type * p_src,t_size p_count) {
@@ -115,6 +124,7 @@ namespace pfc {
 		if (traits_t<t_type>::needs_constructor) {
 			t_type * ret = new(&p_item) t_type;
 			PFC_ASSERT(ret == &p_item);
+            (void) ret; // suppress warning
 		}
 	}
 
@@ -148,6 +158,7 @@ namespace pfc {
 		if (traits_t<t_type>::needs_constructor) {
 			t_type * ret = new(&p_item) t_type(p_copyfrom);
 			PFC_ASSERT(ret == &p_item);
+            (void) ret; // suppress warning
 		} else {
 			p_item = p_copyfrom;
 		}
@@ -283,9 +294,9 @@ namespace pfc {
 		if (traits_t<T>::realloc_safe) {
 			__unsafe__swap_raw_t<sizeof(T)>( reinterpret_cast<void*>( &p_item1 ), reinterpret_cast<void*>( &p_item2 ) );
 		} else {
-			T temp(p_item2);
-			p_item2 = p_item1;
-			p_item1 = temp;
+			T temp( std::move(p_item2) );
+			p_item2 = std::move(p_item1);
+			p_item1 = std::move(temp);
 		}
 	}
 
@@ -293,13 +304,7 @@ namespace pfc {
 	//! p_item2 value is undefined after performing a move_t. For an example, in certain cases move_t will fall back to swap_t.
 	template<typename T>
 	inline void move_t(T & p_item1, T & p_item2) {
-		typedef traits_t<T> t;
-		if (t::needs_constructor || t::needs_destructor) {
-			if (t::realloc_safe) swap_t(p_item1, p_item2);
-			else p_item1 = p_item2;
-		} else {
-			p_item1 = p_item2;
-		}
+		p_item1 = std::move(p_item2);
 	}
 
 	template<typename t_array>
@@ -464,14 +469,12 @@ namespace pfc {
 		}
 	}
 
-	
-
-	template<typename t_array,typename T>
-	inline t_size append_t(t_array & p_array,const T & p_item)
+	template<typename t_array, typename T>
+	inline t_size append_t(t_array & p_array, T && p_item)
 	{
 		t_size old_count = p_array.get_size();
 		p_array.set_size(old_count + 1);
-		p_array[old_count] = p_item;
+		p_array[old_count] = std::forward<T>(p_item);
 		return old_count;
 	}
 
@@ -503,7 +506,37 @@ namespace pfc {
 		p_array[p_index] = p_item;
 		return p_index;
 	}
+	template<typename array1_t, typename array2_t>
+	void insert_array_t( array1_t & outArray, size_t insertAt, array2_t const & inArray, size_t inArraySize) {
+		const size_t oldSize = outArray.get_size();
+		if (insertAt > oldSize) insertAt = oldSize;
+		const size_t newSize = oldSize + inArraySize;
+		outArray.set_size( newSize );
+		for(size_t m = oldSize; m != insertAt; --m) {
+			move_t( outArray[ m - 1 + inArraySize], outArray[m - 1] );
+		}
+		for(size_t w = 0; w < inArraySize; ++w) {
+			outArray[ insertAt + w ]  = inArray[ w ];
+		}
+	}
 
+	template<typename t_array,typename in_array_t>
+	inline t_size insert_multi_t(t_array & p_array,const in_array_t & p_items, size_t p_itemCount, t_size p_index) {
+		const t_size old_count = p_array.get_size();
+		const size_t new_count = old_count + p_itemCount;
+		if (p_index > old_count) p_index = old_count;
+		p_array.set_size(new_count);
+		size_t toMove = old_count - p_index;
+		for(size_t w = 0; w < toMove; ++w) {
+			move_t( p_array[new_count - 1 - w], p_array[old_count - 1 - w] );
+		}
+		
+		for(size_t w = 0; w < p_itemCount; ++w) {
+			p_array[p_index+w] = p_items[w];
+		}
+
+		return p_index;
+	}
 	template<typename t_array,typename T>
 	inline t_size insert_swap_t(t_array & p_array,T & p_item,t_size p_index) {
 		t_size old_count = p_array.get_size();
@@ -622,7 +655,7 @@ namespace pfc {
 	template<typename TVal> void memxor_t(TVal * out, const TVal * s1, const TVal * s2, t_size count) {
 		for(t_size walk = 0; walk < count; ++walk) out[walk] = s1[walk] ^ s2[walk];
 	}
-	static void memxor(void * target, const void * source1, const void * source2, t_size size) {
+	inline static void memxor(void * target, const void * source1, const void * source2, t_size size) {
 		memxor_t( reinterpret_cast<t_uint8*>(target), reinterpret_cast<const t_uint8*>(source1), reinterpret_cast<const t_uint8*>(source2), size);
 	}
 
@@ -645,16 +678,17 @@ namespace pfc {
 	template<> inline const wchar_t * empty_string_t<wchar_t>() {return L"";}
 
 
-	template<typename t_type,typename t_newval>
-	t_type replace_t(t_type & p_var,const t_newval & p_newval) {
-		t_type oldval = p_var;
-		p_var = p_newval;
+	template<typename type_t, typename arg_t>
+	type_t replace_t(type_t & p_var,arg_t && p_newval) {
+		auto oldval = std::move(p_var);
+		p_var = std::forward<arg_t>(p_newval);
 		return oldval;
 	}
+
 	template<typename t_type>
 	t_type replace_null_t(t_type & p_var) {
-		t_type ret = p_var;
-		p_var = NULL;
+		t_type ret = std::move(p_var);
+		p_var = 0;
 		return ret;
 	}
 
@@ -676,16 +710,40 @@ namespace pfc {
 		array_rangecheck_t(p_array,p_from); array_rangecheck_t(p_array,p_to);
 	}
 
-	inline t_int32 rint32(double p_val) {return (t_int32) floor(p_val + 0.5);}
-	inline t_int64 rint64(double p_val) {return (t_int64) floor(p_val + 0.5);}
+	t_int32 rint32(double p_val);
+	t_int64 rint64(double p_val);
 
+	//! Returns amount of items left.
+	template<typename array_t, typename pred_t>
+	inline size_t remove_if_t( array_t & arr, pred_t pred ) {
+		const size_t inCount = arr.size();
+		size_t walk = 0;
 
+		for (;; ) {
+			if ( walk == inCount ) return inCount;
+			if ( pred(arr[walk]) ) break;
+			++ walk;
+		}
 
+		size_t total = walk;
 
+		++ walk; // already know that at walk is pred() positive
+		
+		for( ; walk < inCount; ++ walk ) {
+			if ( !pred(arr[walk] ) ) {
+				move_t(arr[total++], arr[walk]);
+			}
+		}
+		arr.resize(total);
+
+		return total;
+	}
+
+	//! Returns amount of items left.
 	template<typename t_array>
-	inline t_size remove_mask_t(t_array & p_array,const bit_array & p_mask)//returns amount of items left
+	inline t_size remove_mask_t(t_array & p_array,const bit_array & p_mask)
 	{
-		t_size n,count = p_array.get_size(), total = 0;
+		t_size n,count = p_array.size(), total = 0;
 
 		n = total = p_mask.find(true,0,count);
 
@@ -694,7 +752,7 @@ namespace pfc {
 			for(n=p_mask.find(false,n+1,count-n-1);n<count;n=p_mask.find(false,n+1,count-n-1))
 				move_t(p_array[total++],p_array[n]);
 
-			p_array.set_size(total);
+			p_array.resize(total);
 			
 			return total;
 		}
@@ -745,7 +803,7 @@ namespace pfc {
 	template<typename t_array>
 	class __list_to_array_enumerator {
 	public:
-		__list_to_array_enumerator(t_array & p_array) : m_array(p_array), m_walk(0) {}
+		__list_to_array_enumerator(t_array & p_array) : m_walk(), m_array(p_array) {}
 		template<typename t_item>
 		void operator() (const t_item & p_item) {
 			PFC_ASSERT(m_walk < m_array.get_size());
@@ -802,7 +860,8 @@ namespace pfc {
 		if (p_val > p_acc) p_acc = p_val;
 	}
 
-	t_uint64 pow_int(t_uint64 base, t_uint64 exp);
+	t_uint64 pow_int(t_uint64 base, t_uint64 exp) noexcept;
+	double exp_int(double base, int exp) noexcept;
 
 
 	template<typename t_val>
@@ -813,13 +872,150 @@ namespace pfc {
 	private:
 		t_val & v;
 	};
+	template<typename obj_t>
+	incrementScope<obj_t> autoIncrement(obj_t& v) { return incrementScope<obj_t>(v); }
+
+	constexpr inline unsigned countBits32(uint32_t i) {
+		const uint32_t mask = 0x11111111;
+		uint32_t acc = i & mask;
+		acc += (i >> 1) & mask;
+		acc += (i >> 2) & mask;
+		acc += (i >> 3) & mask;
+
+		const uint32_t mask2 = 0x0F0F0F0F;
+		uint32_t acc2 = acc & mask2;
+		acc2 += (acc >> 4) & mask2;
+	
+		const uint32_t mask3 = 0x00FF00FF;
+		uint32_t acc3 = acc2 & mask3;
+		acc3 += (acc2 >> 8) & mask3;
+
+		return (acc3 & 0xFFFF) + ((acc3 >> 16) & 0xFFFF);
+	}
+
+    // Forward declarations
+    template<typename t_to,typename t_from>
+	void copy_array_t(t_to & p_to,const t_from & p_from);
+
+	template<typename t_array,typename t_value>
+	void fill_array_t(t_array & p_array,const t_value & p_value);
+
+	// Generic no-op for breakpointing stuff
+	inline void nop() {}
+
+	template<class T>
+	class vartoggle_t {
+		T oldval; T& var;
+	public:
+		vartoggle_t(const vartoggle_t&) = delete;
+		void operator=(const vartoggle_t&) = delete;
+		template<typename arg_t>
+		vartoggle_t(T& p_var, arg_t&& val) : var(p_var) {
+			oldval = std::move(var);
+			var = std::forward<arg_t>(val);
+		}
+		~vartoggle_t() { var = std::move(oldval); }
+	};
+
+	template<typename T, typename arg_t>
+	vartoggle_t<T> autoToggle(T& p_var, arg_t&& val) {
+		return vartoggle_t<T>(p_var, std::forward<arg_t>(val));
+	}
+
+	template<class T>
+	class vartoggle_volatile_t {
+		T oldval; volatile T& var;
+	public:
+		template<typename arg_t>
+		vartoggle_volatile_t(volatile T& p_var, arg_t && val) : var(p_var) {
+			oldval = std::move(var);
+			var = std::forward<arg_t>(val);
+		}
+		~vartoggle_volatile_t() { var = std::move(oldval); }
+	};
+
+	typedef vartoggle_t<bool> booltoggle;
+
+	template<typename obj_t>
+	class singleton {
+	public:
+		static obj_t instance;
+	};
+	template<typename obj_t>
+	obj_t singleton<obj_t>::instance;
 
 };
+#define PFC_SINGLETON(X) ::pfc::singleton<X>::instance
 
 
 #define PFC_CLASS_NOT_COPYABLE(THISCLASSNAME,THISTYPE) \
-	private:	\
-	THISCLASSNAME(const THISTYPE&) {throw pfc::exception_bug_check();}	\
-	const THISTYPE & operator=(const THISTYPE &) {throw pfc::exception_bug_check();}
+	THISCLASSNAME(const THISTYPE&) = delete; \
+	const THISTYPE & operator=(const THISTYPE &) = delete;
 
 #define PFC_CLASS_NOT_COPYABLE_EX(THISTYPE) PFC_CLASS_NOT_COPYABLE(THISTYPE,THISTYPE)
+
+
+namespace pfc {
+	template<typename t_char>
+	t_size strlen_max_t(const t_char* ptr, t_size max) noexcept {
+		PFC_ASSERT(ptr != NULL || max == 0);
+		t_size n = 0;
+		while (n < max && ptr[n] != 0) n++;
+		return n;
+	}
+
+	inline t_size strlen_max(const char* ptr, t_size max) noexcept { return strlen_max_t(ptr, max); }
+	inline t_size wcslen_max(const wchar_t* ptr, t_size max) noexcept { return strlen_max_t(ptr, max); }
+
+#ifdef _WINDOWS
+	inline t_size tcslen_max(const TCHAR* ptr, t_size max) noexcept { return strlen_max_t(ptr, max); }
+#endif
+}
+
+namespace pfc {
+	class autoScope {
+	public:
+		autoScope() {}
+		autoScope(std::function<void()>&& f) : m_cleanup(std::move(f)) {}
+
+		template<typename what_t> void increment(what_t& obj) {
+			reset();
+			++obj;
+			m_cleanup = [&obj] { --obj; };
+		}
+		template<typename what_t, typename arg_t> void toggle(what_t& obj, arg_t && val) {
+			reset();
+			what_t old = obj;
+			obj = std::forward<arg_t>(val);
+			m_cleanup = [v = std::move(old), &obj]{
+				obj = std::move(v);
+			};
+		}
+		void operator() (std::function<void()>&& f) {
+			reset(); m_cleanup = std::move(f);
+		}
+
+		~autoScope() {
+			if (m_cleanup) m_cleanup();
+		}
+
+		void cancel() {
+			m_cleanup = nullptr;
+		}
+
+		void reset() {
+			if (m_cleanup) {
+				m_cleanup();
+				m_cleanup = nullptr;
+			}
+		}
+
+		autoScope(const autoScope&) = delete;
+		void operator=(const autoScope&) = delete;
+
+		operator bool() const { return !!m_cleanup; }
+	private:
+		std::function<void()> m_cleanup;
+	};
+	typedef autoScope onLeaving;
+}
