@@ -29,3 +29,14 @@ foo_touchremote.opensdf
 *.vcproj.user
 *.csproj.user
 *.vcxproj.user
+/FoobarSDK/foobar2000/foobar2000_component_client/foobar2000_component_client.xcodeproj
+/FoobarSDK/foobar2000/foobar2000_component_client/x64/Release
+/FoobarSDK/foobar2000/foo_sample/foo_sample.xcodeproj
+/FoobarSDK/foobar2000/SDK/x64/Release
+/FoobarSDK/pfc/x64/Release
+/foo_touchremote/.vs/foo_touchremote
+/foo_touchremote/foo_touchremote/x64/Release
+/foo_touchremote/x64/Release
+/foo_touchremote/TouchRemote.Bonjour/.vs
+/foo_touchremote/TouchRemote.Core/.vs
+/foo_touchremote/TouchRemote.Interfaces/.vs
